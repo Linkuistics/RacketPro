@@ -1,7 +1,6 @@
 #lang racket/base
 
 (require racket/class
-         racket/match
          racket/list
          racket/string
          syntax/modread
