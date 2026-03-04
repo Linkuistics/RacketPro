@@ -259,6 +259,19 @@ class HmEditor extends LitElement {
       })
     );
 
+    // editor:goto — jump to a specific position (e.g., from error panel click)
+    this._unsubs.push(
+      onMessage('editor:goto', (msg) => {
+        if (this._editor) {
+          const { line, col } = msg;
+          const position = { lineNumber: line || 1, column: (col || 0) + 1 };
+          this._editor.setPosition(position);
+          this._editor.revealPositionInCenter(position);
+          this._editor.focus();
+        }
+      })
+    );
+
     // editor:request-save — Racket asks frontend to trigger a save
     // (e.g., when the user clicks File > Save in the menu bar)
     this._unsubs.push(

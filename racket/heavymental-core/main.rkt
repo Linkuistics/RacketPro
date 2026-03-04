@@ -70,9 +70,22 @@
                                               'props (hasheq 'file-path ""
                                                              'language "racket")
                                               'children (list))
-                                      (hasheq 'type "terminal"
-                                              'props (hasheq 'pty-id "repl")
-                                              'children (list))))))))
+                                      (hasheq 'type "vbox"
+                                              'props (hasheq 'flex "1")
+                                              'children
+                                              (list
+                                               (hasheq 'type "panel-header"
+                                                       'props (hasheq 'label "TERMINAL")
+                                                       'children (list))
+                                               (hasheq 'type "terminal"
+                                                       'props (hasheq 'pty-id "repl")
+                                                       'children (list))
+                                               (hasheq 'type "panel-header"
+                                                       'props (hasheq 'label "PROBLEMS")
+                                                       'children (list))
+                                               (hasheq 'type "error-panel"
+                                                       'props (hasheq)
+                                                       'children (list))))))))))
            ;; ── Status bar ──
            (hasheq 'type "statusbar"
                    'props (hasheq 'content "cell:status"
@@ -144,6 +157,13 @@
      (handle-document-changed msg)]
     [(string=? event-name "document:closed")
      (handle-document-closed msg)]
+    ;; Editor navigation: jump to a specific position
+    [(string=? event-name "editor:goto")
+     (define line (message-ref msg 'line 1))
+     (define col (message-ref msg 'col 0))
+     (send-message! (make-message "editor:goto"
+                                  'line line
+                                  'col col))]
     ;; Completion request
     [(string=? event-name "intel:completion-request")
      (handle-completion-request msg)]
