@@ -16,6 +16,7 @@ import './primitives/terminal.js';
 import './primitives/tabs.js';
 import './primitives/filetree.js';
 import './primitives/panel-header.js';
+import './lang-intel.js';
 
 async function boot() {
   console.log('[HeavyMental] Booting...');

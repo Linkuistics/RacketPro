@@ -18,6 +18,7 @@ import { LitElement, html, css } from 'lit';
 import { effect } from '@preact/signals-core';
 import { getCell } from '../cells.js';
 import { onMessage, dispatch } from '../bridge.js';
+import { initLangIntel } from '../lang-intel.js';
 import {
   racketLanguageId,
   racketLanguageConfig,
@@ -150,6 +151,17 @@ class HmEditor extends LitElement {
       scrollBeyondLastLine: false,
     });
 
+    // Inject check-syntax semantic coloring styles into shadow root
+    const csStyle = document.createElement('style');
+    csStyle.textContent = `
+      .hm-cs-lexically-bound { color: #0000CD !important; }
+      .hm-cs-imported { color: #006400 !important; }
+      .hm-cs-set\\!d { color: #8B0000 !important; }
+      .hm-cs-free-variable { text-decoration: wavy underline red !important; }
+      .hm-cs-unused-require { opacity: 0.5 !important; text-decoration: line-through !important; }
+    `;
+    this.shadowRoot.appendChild(csStyle);
+
     // Track changes for dirty state + debounced document:changed
     this._changeDisposable = this._editor.onDidChangeModelContent((e) => {
       if (!this._dirty) {
@@ -185,6 +197,12 @@ class HmEditor extends LitElement {
       },
     });
 
+    // Initialize language intelligence with Monaco and editor references
+    initLangIntel(monaco, this._editor);
+
+    // Expose filePath on editor for lang-intel to read
+    this._editor.filePath = this.filePath;
+
     console.log('[hm-editor] Monaco editor created');
   }
 
@@ -197,6 +215,7 @@ class HmEditor extends LitElement {
       onMessage('editor:open', (msg) => {
         const { path, content, language } = msg;
         if (path !== undefined) this.filePath = path;
+        if (this._editor) this._editor.filePath = this.filePath;
         if (language !== undefined) this.language = language;
 
         if (this._editor && this._monaco) {
