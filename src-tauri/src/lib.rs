@@ -75,7 +75,14 @@ pub fn run() {
             let script_str = script_path.to_string_lossy().to_string();
             log::info!("Racket script path: {script_str}");
 
-            let bridge = match RacketBridge::start(app.handle().clone(), &script_str) {
+            // Create PtyManager first — shared between the bridge and Tauri commands.
+            let pty_manager = PtyManager::new();
+
+            let bridge = match RacketBridge::start(
+                app.handle().clone(),
+                &script_str,
+                pty_manager.clone(),
+            ) {
                 Ok(b) => {
                     log::info!("Racket bridge started successfully");
                     Some(Arc::new(b))
@@ -86,6 +93,7 @@ pub fn run() {
                 }
             };
             app.manage(AppState { bridge });
+            app.manage(pty_manager);
 
             Ok(())
         })
@@ -106,7 +114,6 @@ pub fn run() {
             }
         })
         .plugin(tauri_plugin_dialog::init())
-        .manage(PtyManager::new())
         .invoke_handler(tauri::generate_handler![
             send_to_racket,
             frontend_ready,

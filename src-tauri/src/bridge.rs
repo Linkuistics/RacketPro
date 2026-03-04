@@ -1,3 +1,4 @@
+use crate::pty::PtyManager;
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
@@ -6,6 +7,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{AppHandle, Emitter};
+use tauri_plugin_dialog::DialogExt;
 
 /// Manages a child Racket process, routing JSON-RPC messages between the
 /// Tauri WebView and Racket's stdin/stdout.
@@ -171,10 +173,230 @@ fn handle_menu_set(app: &AppHandle, menu_data: &Value) {
     }
 }
 
+/// Handle messages from Racket that should be intercepted by the Rust layer
+/// rather than forwarded to the frontend.  Returns `true` if the message was
+/// handled (and should NOT be forwarded).
+fn handle_intercepted_message(
+    msg_type: &str,
+    msg: &Value,
+    app: &AppHandle,
+    tx: &mpsc::Sender<Value>,
+    pty: &PtyManager,
+) -> bool {
+    match msg_type {
+        // ----- Menu --------------------------------------------------------
+        "menu:set" => {
+            if let Some(menu_data) = msg.get("menu") {
+                let app_clone = app.clone();
+                let menu_data = menu_data.clone();
+                let _ = app.run_on_main_thread(move || {
+                    handle_menu_set(&app_clone, &menu_data);
+                });
+            } else {
+                log::warn!("menu:set message missing 'menu' field");
+            }
+            true
+        }
+
+        // ----- PTY ---------------------------------------------------------
+        "pty:create" => {
+            let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let command = msg
+                .get("command")
+                .and_then(|v| v.as_str())
+                .unwrap_or("/bin/sh");
+            let args: Vec<String> = msg
+                .get("args")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let cols = msg.get("cols").and_then(|v| v.as_u64()).unwrap_or(80) as u16;
+            let rows = msg.get("rows").and_then(|v| v.as_u64()).unwrap_or(24) as u16;
+
+            if let Err(e) = pty.create(id, command, &args, cols, rows, app.clone()) {
+                log::error!("pty:create failed: {e}");
+            }
+            true
+        }
+        "pty:write" => {
+            let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let data = msg.get("data").and_then(|v| v.as_str()).unwrap_or("");
+            if let Err(e) = pty.write(id, data) {
+                log::error!("pty:write failed: {e}");
+            }
+            true
+        }
+        "pty:kill" => {
+            let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            if let Err(e) = pty.kill(id) {
+                log::error!("pty:kill failed: {e}");
+            }
+            true
+        }
+
+        // ----- File I/O ----------------------------------------------------
+        "file:read" => {
+            let path = msg
+                .get("path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let tx = tx.clone();
+            match crate::fs::read_file(&path) {
+                Ok(result) => {
+                    let _ = tx.send(result);
+                }
+                Err(e) => {
+                    let _ = tx.send(serde_json::json!({
+                        "type": "file:read:error",
+                        "path": path,
+                        "error": e,
+                    }));
+                }
+            }
+            true
+        }
+        "file:write" => {
+            let path = msg
+                .get("path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let content = msg
+                .get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let tx = tx.clone();
+            match crate::fs::write_file(&path, &content) {
+                Ok(result) => {
+                    let _ = tx.send(result);
+                }
+                Err(e) => {
+                    let _ = tx.send(serde_json::json!({
+                        "type": "file:write:error",
+                        "path": path,
+                        "error": e,
+                    }));
+                }
+            }
+            true
+        }
+
+        // ----- File Dialogs (blocking — run on separate threads) -----------
+        "file:open-dialog" => {
+            let tx = tx.clone();
+            let app = app.clone();
+            thread::spawn(move || {
+                let picked = app
+                    .dialog()
+                    .file()
+                    .add_filter("Racket", &["rkt", "scrbl", "rhm"])
+                    .add_filter("All", &["*"])
+                    .blocking_pick_file();
+
+                match picked {
+                    Some(file_path) => match file_path.into_path() {
+                        Ok(path_buf) => {
+                            let path = path_buf.to_string_lossy().to_string();
+                            match crate::fs::read_file(&path) {
+                                Ok(result) => {
+                                    let _ = tx.send(result);
+                                }
+                                Err(e) => {
+                                    let _ = tx.send(serde_json::json!({
+                                        "type": "file:read:error",
+                                        "path": path,
+                                        "error": e,
+                                    }));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx.send(serde_json::json!({
+                                "type": "file:read:error",
+                                "path": "",
+                                "error": format!("Invalid file path: {e}"),
+                            }));
+                        }
+                    },
+                    None => {
+                        let _ = tx.send(serde_json::json!({
+                            "type": "file:open-dialog:cancelled",
+                        }));
+                    }
+                }
+            });
+            true
+        }
+        "file:save-dialog" => {
+            let content = msg
+                .get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let tx = tx.clone();
+            let app = app.clone();
+            thread::spawn(move || {
+                let picked = app
+                    .dialog()
+                    .file()
+                    .add_filter("Racket", &["rkt", "scrbl", "rhm"])
+                    .add_filter("All", &["*"])
+                    .blocking_save_file();
+
+                match picked {
+                    Some(file_path) => match file_path.into_path() {
+                        Ok(path_buf) => {
+                            let path = path_buf.to_string_lossy().to_string();
+                            match crate::fs::write_file(&path, &content) {
+                                Ok(result) => {
+                                    let _ = tx.send(result);
+                                }
+                                Err(e) => {
+                                    let _ = tx.send(serde_json::json!({
+                                        "type": "file:write:error",
+                                        "path": path,
+                                        "error": e,
+                                    }));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx.send(serde_json::json!({
+                                "type": "file:write:error",
+                                "path": "",
+                                "error": format!("Invalid file path: {e}"),
+                            }));
+                        }
+                    },
+                    None => {
+                        let _ = tx.send(serde_json::json!({
+                            "type": "file:save-dialog:cancelled",
+                        }));
+                    }
+                }
+            });
+            true
+        }
+
+        // Not intercepted — forward to frontend
+        _ => false,
+    }
+}
+
 impl RacketBridge {
     /// Spawn a Racket process running `script_path` and wire up the message
     /// channels.  Returns `Err` only if the process cannot be spawned.
-    pub fn start(app_handle: AppHandle, script_path: &str) -> Result<Self, String> {
+    pub fn start(
+        app_handle: AppHandle,
+        script_path: &str,
+        pty_manager: PtyManager,
+    ) -> Result<Self, String> {
         let mut child = Command::new("racket")
             .arg(script_path)
             .stdin(Stdio::piped())
@@ -182,6 +404,39 @@ impl RacketBridge {
             .stderr(Stdio::inherit())
             .spawn()
             .map_err(|e| format!("Failed to spawn Racket process: {e}"))?;
+
+        // --- stdin writer (blocking, runs in a std::thread) -----------------
+        // Created before the stdout reader so that tx can be cloned into the
+        // reader thread (for sending responses back to Racket).
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| "Failed to capture Racket stdin".to_string())?;
+
+        let (tx, rx) = mpsc::channel::<Value>();
+
+        thread::spawn(move || {
+            let mut stdin = stdin;
+            for msg in rx {
+                let mut line = match serde_json::to_string(&msg) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        log::error!("Failed to serialize message for Racket: {e}");
+                        continue;
+                    }
+                };
+                line.push('\n');
+                if let Err(e) = stdin.write_all(line.as_bytes()) {
+                    log::error!("Failed to write to Racket stdin: {e}");
+                    break;
+                }
+                if let Err(e) = stdin.flush() {
+                    log::error!("Failed to flush Racket stdin: {e}");
+                    break;
+                }
+            }
+            log::info!("Racket stdin writer thread exiting");
+        });
 
         // --- stdout reader (blocking, runs in a std::thread) ----------------
         let stdout = child
@@ -195,6 +450,8 @@ impl RacketBridge {
         let reader_handle = app_handle.clone();
         let reader_ready = Arc::clone(&ready);
         let reader_pending = Arc::clone(&pending);
+        let reader_tx = tx.clone();
+        let reader_pty = pty_manager;
         thread::spawn(move || {
             let reader = BufReader::new(stdout);
             for line in reader.lines() {
@@ -208,29 +465,23 @@ impl RacketBridge {
                                 let msg_type = msg
                                     .get("type")
                                     .and_then(|v| v.as_str())
-                                    .unwrap_or("unknown");
+                                    .unwrap_or("unknown")
+                                    .to_string();
 
-                                // Intercept menu:set to build native menus
-                                if msg_type == "menu:set" {
-                                    if let Some(menu_data) = msg.get("menu") {
-                                        let app = reader_handle.clone();
-                                        let menu_data = menu_data.clone();
-                                        // Menu operations must run on the main
-                                        // thread, so dispatch via
-                                        // run_on_main_thread.
-                                        let _ = reader_handle.run_on_main_thread(
-                                            move || {
-                                                handle_menu_set(&app, &menu_data);
-                                            },
-                                        );
-                                    } else {
-                                        log::warn!(
-                                            "menu:set message missing 'menu' field"
-                                        );
-                                    }
+                                let intercepted =
+                                    handle_intercepted_message(
+                                        &msg_type,
+                                        &msg,
+                                        &reader_handle,
+                                        &reader_tx,
+                                        &reader_pty,
+                                    );
+
+                                if intercepted {
                                     continue;
                                 }
 
+                                // Forward non-intercepted messages to the frontend.
                                 let event_name = format!("racket:{msg_type}");
 
                                 // Queue messages until the frontend signals readiness
@@ -261,37 +512,6 @@ impl RacketBridge {
                 }
             }
             log::info!("Racket stdout reader thread exiting");
-        });
-
-        // --- stdin writer (blocking, runs in a std::thread) -----------------
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| "Failed to capture Racket stdin".to_string())?;
-
-        let (tx, rx) = mpsc::channel::<Value>();
-
-        thread::spawn(move || {
-            let mut stdin = stdin;
-            for msg in rx {
-                let mut line = match serde_json::to_string(&msg) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        log::error!("Failed to serialize message for Racket: {e}");
-                        continue;
-                    }
-                };
-                line.push('\n');
-                if let Err(e) = stdin.write_all(line.as_bytes()) {
-                    log::error!("Failed to write to Racket stdin: {e}");
-                    break;
-                }
-                if let Err(e) = stdin.flush() {
-                    log::error!("Failed to flush Racket stdin: {e}");
-                    break;
-                }
-            }
-            log::info!("Racket stdin writer thread exiting");
         });
 
         Ok(Self {

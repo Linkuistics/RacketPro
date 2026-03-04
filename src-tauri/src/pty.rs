@@ -10,6 +10,7 @@ pub struct PtyInstance {
     _master: Box<dyn MasterPty + Send>,
 }
 
+#[derive(Clone)]
 pub struct PtyManager {
     instances: Arc<Mutex<HashMap<String, PtyInstance>>>,
 }
