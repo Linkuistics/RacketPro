@@ -4,7 +4,8 @@
          "protocol.rkt"
          "cell.rkt"
          "editor.rkt"
-         "repl.rkt")
+         "repl.rkt"
+         "lang-intel.rkt")
 
 ;; ── Cells ──────────────────────────────────────────────────
 (define-cell current-file "")
@@ -136,6 +137,16 @@
      (cell-set! 'status "")
      (cell-set! 'file-dirty #f)
      (send-message! (make-message "editor:set-content" 'content ""))]
+    ;; Document sync for language intelligence
+    [(string=? event-name "document:opened")
+     (handle-document-opened msg)]
+    [(string=? event-name "document:changed")
+     (handle-document-changed msg)]
+    [(string=? event-name "document:closed")
+     (handle-document-closed msg)]
+    ;; Completion request
+    [(string=? event-name "intel:completion-request")
+     (handle-completion-request msg)]
     [else
      (eprintf "Unknown event: ~a\n" event-name)]))
 
