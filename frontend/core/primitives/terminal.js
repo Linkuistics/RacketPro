@@ -57,6 +57,8 @@ class HmTerminal extends LitElement {
     this._unlistenExit = null;
     /** @type {import('@xterm/xterm').IDisposable|null} */
     this._onDataDisposable = null;
+    /** @type {import('@xterm/xterm').IDisposable|null} */
+    this._linkProviderDisposable = null;
   }
 
   render() {
@@ -129,6 +131,53 @@ class HmTerminal extends LitElement {
 
     this._terminal.open(container);
     this._fitAddon.fit();
+
+    // Racket error link provider — detects "path:line:col:" patterns
+    // in terminal output and makes them clickable to jump to source.
+    this._linkProviderDisposable = this._terminal.registerLinkProvider({
+      provideLinks: (bufferLineNumber, callback) => {
+        const line = this._terminal.buffer.active.getLine(bufferLineNumber);
+        if (!line) { callback(undefined); return; }
+        const text = line.translateToString();
+
+        // Match Racket error locations: /path/to/file.rkt:10:5
+        const regex = /(\/[^\s:]+\.(?:rkt|rhm|scrbl)):(\d+):(\d+)/g;
+        const links = [];
+        let match;
+        while ((match = regex.exec(text)) !== null) {
+          // Capture match values in locals — the `match` variable mutates
+          // on each iteration, so the activate closure must not reference it.
+          const filePath = match[1];
+          const fileLine = parseInt(match[2], 10);
+          const fileCol = parseInt(match[3], 10);
+          const startX = match.index + 1;
+          const endX = match.index + match[0].length + 1;
+
+          links.push({
+            range: {
+              start: { x: startX, y: bufferLineNumber },
+              end: { x: endX, y: bufferLineNumber },
+            },
+            text: match[0],
+            activate: () => {
+              // Dispatch to Racket to open the file and jump to position
+              window.__TAURI__.core.invoke('send_to_racket', {
+                message: {
+                  type: 'event',
+                  name: 'editor:goto-file',
+                  path: filePath,
+                  line: fileLine,
+                  col: fileCol,
+                },
+              }).catch((err) => {
+                console.error('[hm-terminal] goto-file failed:', err);
+              });
+            },
+          });
+        }
+        callback(links.length > 0 ? links : undefined);
+      },
+    });
 
     // Forward user input to the Rust PTY
     this._onDataDisposable = this._terminal.onData((data) => {
@@ -236,6 +285,10 @@ class HmTerminal extends LitElement {
     }
 
     // Dispose xterm resources
+    if (this._linkProviderDisposable) {
+      this._linkProviderDisposable.dispose();
+      this._linkProviderDisposable = null;
+    }
     if (this._onDataDisposable) {
       this._onDataDisposable.dispose();
       this._onDataDisposable = null;

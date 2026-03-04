@@ -164,6 +164,20 @@
      (send-message! (make-message "editor:goto"
                                   'line line
                                   'col col))]
+    ;; REPL error → jump to source file
+    [(string=? event-name "editor:goto-file")
+     (define path (message-ref msg 'path ""))
+     (define line (message-ref msg 'line 1))
+     (define col (message-ref msg 'col 0))
+     (when (not (string=? path ""))
+       ;; Open the file in the editor, then jump to position
+       (send-message! (make-message "file:read" 'path path))
+       ;; Queue a goto after the file is opened
+       ;; TODO: proper sequencing — file:read:result triggers editor:set-content,
+       ;; and the goto should happen after that completes.
+       (send-message! (make-message "editor:goto"
+                                    'line line
+                                    'col col)))]
     ;; Completion request
     [(string=? event-name "intel:completion-request")
      (handle-completion-request msg)]
