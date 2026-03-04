@@ -17,25 +17,31 @@ let root = null;
  * @param {object} node — { type, props, children }
  * @param {HTMLElement} parent — DOM element to append into
  */
-export function renderNode(node, parent) {
+export function renderNode(node, parent, index = 0) {
   if (!node || !node.type) return;
 
   const tagName = `mr-${node.type}`;
   const el = document.createElement(tagName);
 
-  // Copy all props as properties (not attributes) on the element.
-  // This works well with Lit's property system.
+  // Copy props to the element. Hyphenated Racket props are set as HTML
+  // attributes (so Lit's attribute→property reflection picks them up).
+  // Other props are set as JS properties directly.
   if (node.props) {
+    // Map Racket prop names to component property names where they
+    // differ or would collide with native DOM properties.
+    const propMap = {
+      text: 'content',       // Racket 'text' → component 'content'
+      style: 'textStyle',    // Racket 'style' → 'textStyle' (avoid CSSStyleDeclaration)
+    };
+
     for (const [key, value] of Object.entries(node.props)) {
-      // Map Racket prop names to component property names where they
-      // differ or would collide with native DOM properties.
-      if (key === 'text' && (node.type === 'heading' || node.type === 'text')) {
-        // Racket uses 'text', component uses 'content'
-        el.content = value;
-      } else if (key === 'style' && node.type === 'text') {
-        // Racket uses 'style' for text variants ("mono", "muted"),
-        // but el.style is the native CSSStyleDeclaration — use textStyle instead
-        el.textStyle = value;
+      const mapped = propMap[key];
+      if (mapped && (node.type === 'heading' || node.type === 'text')) {
+        el[mapped] = value;
+      } else if (key.includes('-')) {
+        // Hyphenated props (file-path, pty-id, min-size, read-only) →
+        // set as attributes so Lit's attribute reflection works
+        el.setAttribute(key, value);
       } else {
         el[key] = value;
       }
@@ -44,9 +50,14 @@ export function renderNode(node, parent) {
 
   // Recursively render children
   if (Array.isArray(node.children)) {
-    for (const child of node.children) {
-      renderNode(child, el);
-    }
+    node.children.forEach((child, index) => {
+      renderNode(child, el, index);
+    });
+  }
+
+  // Assign named slots for mr-split children
+  if (parent && parent.tagName === 'MR-SPLIT') {
+    el.slot = index === 0 ? 'first' : 'second';
   }
 
   parent.appendChild(el);
