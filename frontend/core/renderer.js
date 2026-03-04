@@ -62,8 +62,12 @@ export function setLayout(tree) {
     console.error('[renderer] No root container — call initRenderer() first');
     return;
   }
-  // Clear existing content
+  // Clear existing content and reset any inline styles from the loading state
   root.textContent = '';
+  root.style.display = '';
+  root.style.alignItems = '';
+  root.style.justifyContent = '';
+  root.style.fontSize = '';
   renderNode(tree, root);
   console.debug('[renderer] Layout rendered');
 }

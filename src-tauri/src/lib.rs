@@ -20,8 +20,19 @@ fn send_to_racket(state: State<'_, AppState>, message: Value) -> Result<(), Stri
         .send(message)
 }
 
+/// Tauri command: signal that the frontend has registered its listeners and is
+/// ready to receive events.  Flushes any messages queued during startup.
+#[tauri::command]
+fn frontend_ready(state: State<'_, AppState>) {
+    if let Some(bridge) = state.bridge.as_ref() {
+        bridge.flush_pending();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    env_logger::init();
+
     tauri::Builder::default()
         .setup(|app| {
             // Resolve the Racket script path.
@@ -72,7 +83,7 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![send_to_racket])
+        .invoke_handler(tauri::generate_handler![send_to_racket, frontend_ready])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

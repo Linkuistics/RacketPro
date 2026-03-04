@@ -1,7 +1,8 @@
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
-use std::sync::{mpsc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{AppHandle, Emitter};
@@ -14,6 +15,12 @@ pub struct RacketBridge {
     /// Handle to the child Racket process, wrapped in a Mutex so `stop()` can
     /// take ownership via `Option::take`.
     child: Mutex<Option<Child>>,
+    /// Whether the frontend has signalled readiness.
+    ready: Arc<AtomicBool>,
+    /// Messages queued before the frontend was ready.
+    pending: Arc<Mutex<Vec<(String, Value)>>>,
+    /// Tauri app handle, used to emit events when flushing.
+    app_handle: AppHandle,
 }
 
 /// Convert a Racket-style shortcut string (e.g. "Cmd+Shift+Z") to a Tauri
@@ -182,7 +189,12 @@ impl RacketBridge {
             .take()
             .ok_or_else(|| "Failed to capture Racket stdout".to_string())?;
 
+        let ready = Arc::new(AtomicBool::new(false));
+        let pending: Arc<Mutex<Vec<(String, Value)>>> = Arc::new(Mutex::new(Vec::new()));
+
         let reader_handle = app_handle.clone();
+        let reader_ready = Arc::clone(&ready);
+        let reader_pending = Arc::clone(&pending);
         thread::spawn(move || {
             let reader = BufReader::new(stdout);
             for line in reader.lines() {
@@ -220,7 +232,14 @@ impl RacketBridge {
                                 }
 
                                 let event_name = format!("racket:{msg_type}");
-                                if let Err(e) =
+
+                                // Queue messages until the frontend signals readiness
+                                if !reader_ready.load(Ordering::Acquire) {
+                                    log::info!("Queuing message (frontend not ready): {event_name}");
+                                    if let Ok(mut q) = reader_pending.lock() {
+                                        q.push((event_name, msg));
+                                    }
+                                } else if let Err(e) =
                                     reader_handle.emit(&event_name, &msg)
                                 {
                                     log::error!(
@@ -278,6 +297,9 @@ impl RacketBridge {
         Ok(Self {
             tx,
             child: Mutex::new(Some(child)),
+            ready,
+            pending,
+            app_handle,
         })
     }
 
@@ -286,6 +308,25 @@ impl RacketBridge {
         self.tx
             .send(msg)
             .map_err(|e| format!("Failed to send message to Racket: {e}"))
+    }
+
+    /// Flush all queued messages to the frontend and mark as ready.
+    /// Called once when the frontend signals that its listeners are registered.
+    pub fn flush_pending(&self) {
+        // Set ready first so the reader thread starts emitting directly
+        self.ready.store(true, Ordering::Release);
+
+        let queued: Vec<(String, Value)> = {
+            let mut q = self.pending.lock().expect("pending lock poisoned");
+            std::mem::take(&mut *q)
+        };
+
+        log::info!("Flushing {} queued messages to frontend", queued.len());
+        for (event_name, msg) in queued {
+            if let Err(e) = self.app_handle.emit(&event_name, &msg) {
+                log::error!("Failed to emit queued event {event_name}: {e}");
+            }
+        }
     }
 
     /// Kill the child Racket process (idempotent).
