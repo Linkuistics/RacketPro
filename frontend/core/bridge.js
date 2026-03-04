@@ -122,3 +122,47 @@ export async function initBridge() {
 
   console.log('[bridge] Bridge initialised');
 }
+
+// ---------------------------------------------------------------------------
+// Request / Response correlation
+// ---------------------------------------------------------------------------
+// Allows the frontend to send a request to Racket and receive a correlated
+// response.  Each request carries a unique numeric `id`; when Racket replies
+// with a message bearing the same `id`, the corresponding Promise resolves.
+// Used by completion providers and other query-response interactions.
+
+let nextRequestId = 1;
+const pendingRequests = new Map();
+
+/**
+ * Send a request to the Racket process and return a Promise that resolves
+ * when a response with a matching `id` arrives.
+ *
+ * @param {string} type — request name (e.g. "textDocument/completion")
+ * @param {object} [payload={}] — additional fields merged into the message
+ * @returns {Promise<any>}
+ */
+export function request(type, payload = {}) {
+  const id = nextRequestId++;
+  const message = { type: 'event', name: type, id, ...payload };
+  return new Promise((resolve, reject) => {
+    pendingRequests.set(id, { resolve, reject });
+    window.__TAURI__.core.invoke('send_to_racket', { message })
+      .catch(reject);
+  });
+}
+
+/**
+ * Resolve a pending request by its `id`.  Called when a response message
+ * arrives from Racket bearing the same `id` that was sent in `request()`.
+ *
+ * @param {number} id — the request id
+ * @param {any} data — the response payload
+ */
+export function resolveRequest(id, data) {
+  const pending = pendingRequests.get(id);
+  if (pending) {
+    pendingRequests.delete(id);
+    pending.resolve(data);
+  }
+}

@@ -11,6 +11,8 @@
 // Dispatches to Racket:
 //   editor:dirty          — first edit after a load
 //   editor:save-request   — Cmd/Ctrl+S with { path, content }
+//   document:opened       — file loaded into editor (uri, text, languageId)
+//   document:changed      — debounced content change (uri, text)
 
 import { LitElement, html, css } from 'lit';
 import { effect } from '@preact/signals-core';
@@ -83,6 +85,8 @@ class HmEditor extends LitElement {
     this._dirty = false;
     /** @type {Function[]} Unsubscribe functions for bridge listeners. */
     this._unsubs = [];
+    /** @type {number|null} Debounce timer for document:changed dispatch. */
+    this._changeTimer = null;
     /** @type {import('monaco-editor').monaco.IDisposable|null} */
     this._changeDisposable = null;
     /** @type {import('monaco-editor').monaco.IDisposable|null} */
@@ -146,12 +150,23 @@ class HmEditor extends LitElement {
       scrollBeyondLastLine: false,
     });
 
-    // Track changes for dirty state
-    this._changeDisposable = this._editor.onDidChangeModelContent(() => {
+    // Track changes for dirty state + debounced document:changed
+    this._changeDisposable = this._editor.onDidChangeModelContent((e) => {
       if (!this._dirty) {
         this._dirty = true;
         dispatch('editor:dirty', { path: this.filePath });
       }
+      // Debounced document:changed for language intelligence
+      if (this._changeTimer) clearTimeout(this._changeTimer);
+      this._changeTimer = setTimeout(() => {
+        this._changeTimer = null;
+        if (!this._editor) return;
+        const text = this._editor.getValue();
+        dispatch('document:changed', {
+          uri: this.filePath,
+          text,
+        });
+      }, 500);
     });
 
     // Cmd/Ctrl+S keybinding for save
@@ -197,6 +212,13 @@ class HmEditor extends LitElement {
           this._dirty = true;
           this._editor.setValue(content || '');
           this._dirty = false;
+
+          // Notify Racket that a document is now open for language intelligence
+          dispatch('document:opened', {
+            uri: path || '',
+            text: content || '',
+            languageId: language || 'racket',
+          });
         }
       })
     );
@@ -234,6 +256,12 @@ class HmEditor extends LitElement {
     if (this._disposeVisibility) {
       this._disposeVisibility();
       this._disposeVisibility = null;
+    }
+
+    // Clear debounce timer for document:changed
+    if (this._changeTimer) {
+      clearTimeout(this._changeTimer);
+      this._changeTimer = null;
     }
 
     // Dispose Monaco resources
