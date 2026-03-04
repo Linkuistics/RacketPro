@@ -2,6 +2,7 @@
 
 (require racket/list
          racket/match
+         racket/string
          "protocol.rkt"
          "cell.rkt")
 
@@ -13,7 +14,8 @@
          current-file-path
          current-file-dirty?
          path->filename
-         detect-language)
+         detect-language
+         detect-lang-from-content)
 
 ;; ── Accessors for cell state ─────────────────────────────────
 ;; These read from cells defined in main.rkt via cell-ref.
@@ -36,7 +38,7 @@
   (cond
     [(regexp-match? #rx"\\.rkt$" path) "racket"]
     [(regexp-match? #rx"\\.scrbl$" path) "racket"]
-    [(regexp-match? #rx"\\.rhm$" path) "racket"]
+    [(regexp-match? #rx"\\.rhm$" path) "rhombus"]
     [(regexp-match? #rx"\\.js$" path) "javascript"]
     [(regexp-match? #rx"\\.ts$" path) "typescript"]
     [(regexp-match? #rx"\\.rs$" path) "rust"]
@@ -47,10 +49,16 @@
     [(regexp-match? #rx"\\.md$" path) "markdown"]
     [else "plaintext"]))
 
+;; Detect language from #lang line in file content
+(define (detect-lang-from-content content)
+  (define m (regexp-match #rx"^#lang ([^ \r\n]+)" content))
+  (and m (cadr m)))
+
 ;; Human-readable language name for the status bar
 (define (language-display-name lang-id)
   (cond
     [(string=? lang-id "racket") "Racket"]
+    [(string=? lang-id "rhombus") "Rhombus"]
     [(string=? lang-id "javascript") "JavaScript"]
     [(string=? lang-id "typescript") "TypeScript"]
     [(string=? lang-id "rust") "Rust"]
@@ -127,7 +135,14 @@
      ;; Rust read a file successfully — update state and tell frontend
      (define path (message-ref msg 'path ""))
      (define content (message-ref msg 'content ""))
-     (define lang (detect-language path))
+     ;; Detect language: prefer #lang line, fall back to extension
+     (define lang-from-content (detect-lang-from-content content))
+     (define lang
+       (cond
+         [(and lang-from-content (string=? lang-from-content "rhombus")) "rhombus"]
+         [(and lang-from-content (string-prefix? lang-from-content "typed/")) "racket"]
+         [lang-from-content "racket"]  ;; any #lang → racket for now
+         [else (detect-language path)]))
      (cell-set! 'current-file path)
      (cell-set! 'file-dirty #f)
      (cell-set! 'language (language-display-name lang))

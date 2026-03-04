@@ -66,14 +66,14 @@
 (test-case "detect-language returns racket for .scrbl extension"
   (check-equal? (detect-language "guide.scrbl") "racket"))
 
-(test-case "detect-language returns racket for .rhm extension"
-  (check-equal? (detect-language "demo.rhm") "racket"))
+(test-case "detect-language returns rhombus for .rhm extension"
+  (check-equal? (detect-language "demo.rhm") "rhombus"))
 
 (test-case "detect-language returns plaintext for unknown extension"
   (check-equal? (detect-language "readme.txt") "plaintext"))
 
-(test-case "detect-language returns plaintext for .js extension"
-  (check-equal? (detect-language "app.js") "plaintext"))
+(test-case "detect-language returns javascript for .js extension"
+  (check-equal? (detect-language "app.js") "javascript"))
 
 (test-case "detect-language works with full path"
   (check-equal? (detect-language "/home/user/code/hello.rkt") "racket"))
@@ -142,7 +142,7 @@
       (cell-set! 'current-file "/home/user/demo.rkt")
       (handle-editor-event
        (make-message "event" 'name "editor:dirty"))))
-  (check-equal? (cell-ref 'title) "HeavyMental - demo.rkt *"))
+  (check-equal? (cell-ref 'title) "HeavyMental \u2014 demo.rkt *"))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; Test: handle-file-result with file:read:result
@@ -177,7 +177,7 @@
        (make-message "file:read:result"
                      'path "/home/user/hello.rkt"
                      'content ""))))
-  (check-equal? (cell-ref 'title) "HeavyMental - hello.rkt"))
+  (check-equal? (cell-ref 'title) "HeavyMental \u2014 hello.rkt"))
 
 (test-case "handle-file-result with file:read:result updates status"
   (reset-cells!)
@@ -204,7 +204,78 @@
   (check-not-false editor-msg "editor:open message should be present")
   (check-equal? (hash-ref editor-msg 'path) "/home/user/demo.rhm")
   (check-equal? (hash-ref editor-msg 'content) "fun main(): 42")
+  (check-equal? (hash-ref editor-msg 'language) "rhombus"))
+
+;; ═══════════════════════════════════════════════════════════════════════════
+;; Test: #lang detection in handle-file-result
+;; ═══════════════════════════════════════════════════════════════════════════
+
+(test-case "handle-file-result detects #lang racket from content"
+  (reset-cells!)
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (handle-file-result
+         (make-message "file:read:result"
+                       'path "/home/user/hello.rkt"
+                       'content "#lang racket\n(+ 1 2)")))))
+  (define msgs (parse-all-messages output))
+  (define editor-msg
+    (findf (lambda (m) (string=? (hash-ref m 'type) "editor:open")) msgs))
+  (check-not-false editor-msg)
   (check-equal? (hash-ref editor-msg 'language) "racket"))
+
+(test-case "handle-file-result detects #lang rhombus from content"
+  (reset-cells!)
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (handle-file-result
+         (make-message "file:read:result"
+                       'path "/home/user/demo.rhm"
+                       'content "#lang rhombus\nfun main(): 42")))))
+  (define msgs (parse-all-messages output))
+  (define editor-msg
+    (findf (lambda (m) (string=? (hash-ref m 'type) "editor:open")) msgs))
+  (check-not-false editor-msg)
+  (check-equal? (hash-ref editor-msg 'language) "rhombus"))
+
+(test-case "handle-file-result detects #lang typed/racket as racket"
+  (reset-cells!)
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (handle-file-result
+         (make-message "file:read:result"
+                       'path "/home/user/typed.rkt"
+                       'content "#lang typed/racket\n(: x Integer)")))))
+  (define msgs (parse-all-messages output))
+  (define editor-msg
+    (findf (lambda (m) (string=? (hash-ref m 'type) "editor:open")) msgs))
+  (check-not-false editor-msg)
+  (check-equal? (hash-ref editor-msg 'language) "racket"))
+
+(test-case "handle-file-result falls back to extension when no #lang"
+  (reset-cells!)
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (handle-file-result
+         (make-message "file:read:result"
+                       'path "/home/user/demo.rhm"
+                       'content "fun main(): 42")))))
+  (define msgs (parse-all-messages output))
+  (define editor-msg
+    (findf (lambda (m) (string=? (hash-ref m 'type) "editor:open")) msgs))
+  (check-not-false editor-msg)
+  (check-equal? (hash-ref editor-msg 'language) "rhombus"))
+
+(test-case "detect-lang-from-content extracts #lang name"
+  (check-equal? (detect-lang-from-content "#lang racket\n(+ 1 2)") "racket")
+  (check-equal? (detect-lang-from-content "#lang rhombus\nfun f(): 1") "rhombus")
+  (check-equal? (detect-lang-from-content "#lang typed/racket\n") "typed/racket")
+  (check-false (detect-lang-from-content "no lang line here"))
+  (check-false (detect-lang-from-content "")))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; Test: handle-file-result with file:write:result
@@ -249,11 +320,11 @@
       (new-file)))
   (check-equal? (cell-ref 'file-dirty) #f))
 
-(test-case "new-file sets title to HeavyMental - untitled.rkt"
+(test-case "new-file sets title to HeavyMental \u2014 untitled.rkt"
   (reset-cells!)
   (with-output-to-string
     (lambda () (new-file)))
-  (check-equal? (cell-ref 'title) "HeavyMental - untitled.rkt"))
+  (check-equal? (cell-ref 'title) "HeavyMental \u2014 untitled.rkt"))
 
 (test-case "new-file sets status to New file"
   (reset-cells!)
