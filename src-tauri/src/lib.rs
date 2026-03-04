@@ -1,6 +1,8 @@
 mod bridge;
+mod pty;
 
 use bridge::RacketBridge;
+use pty::PtyManager;
 use serde_json::Value;
 use std::sync::Arc;
 use tauri::{Manager, State};
@@ -27,6 +29,23 @@ fn frontend_ready(state: State<'_, AppState>) {
     if let Some(bridge) = state.bridge.as_ref() {
         bridge.flush_pending();
     }
+}
+
+/// Tauri command: write data to a PTY instance (keyboard input from the terminal).
+#[tauri::command]
+fn pty_input(id: String, data: String, state: State<'_, PtyManager>) -> Result<(), String> {
+    state.write(&id, &data)
+}
+
+/// Tauri command: resize a PTY instance (terminal dimensions changed).
+#[tauri::command]
+fn pty_resize(
+    id: String,
+    cols: u16,
+    rows: u16,
+    state: State<'_, PtyManager>,
+) -> Result<(), String> {
+    state.resize(&id, cols, rows)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -85,7 +104,13 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![send_to_racket, frontend_ready])
+        .manage(PtyManager::new())
+        .invoke_handler(tauri::generate_handler![
+            send_to_racket,
+            frontend_ready,
+            pty_input,
+            pty_resize,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
