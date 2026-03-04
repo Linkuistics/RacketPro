@@ -9,6 +9,8 @@ import { initRenderer } from './renderer.js';
 import './primitives/layout.js';
 import './primitives/content.js';
 import './primitives/input.js';
+import './primitives/split.js';
+import './primitives/chrome.js';
 
 async function boot() {
   console.log('[MrRacket] Booting...');
