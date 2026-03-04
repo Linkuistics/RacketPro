@@ -12,6 +12,7 @@ import './primitives/input.js';
 import './primitives/split.js';
 import './primitives/chrome.js';
 import './primitives/editor.js';
+import './primitives/terminal.js';
 
 async function boot() {
   console.log('[MrRacket] Booting...');
