@@ -1,16 +1,15 @@
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{mpsc, Mutex};
 use std::thread;
 use tauri::{AppHandle, Emitter};
-use tokio::sync::mpsc;
 
 /// Manages a child Racket process, routing JSON-RPC messages between the
 /// Tauri WebView and Racket's stdin/stdout.
 pub struct RacketBridge {
     /// Sender half of the channel used to write JSON messages to Racket's stdin.
-    tx: mpsc::UnboundedSender<Value>,
+    tx: mpsc::Sender<Value>,
     /// Handle to the child Racket process, wrapped in a Mutex so `stop()` can
     /// take ownership via `Option::take`.
     child: Mutex<Option<Child>>,
@@ -68,17 +67,17 @@ impl RacketBridge {
             log::info!("Racket stdout reader thread exiting");
         });
 
-        // --- stdin writer (async, driven by a tokio task) -------------------
+        // --- stdin writer (blocking, runs in a std::thread) -----------------
         let stdin = child
             .stdin
             .take()
             .ok_or_else(|| "Failed to capture Racket stdin".to_string())?;
 
-        let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
+        let (tx, rx) = mpsc::channel::<Value>();
 
-        tokio::spawn(async move {
+        thread::spawn(move || {
             let mut stdin = stdin;
-            while let Some(msg) = rx.recv().await {
+            for msg in rx {
                 let mut line = match serde_json::to_string(&msg) {
                     Ok(s) => s,
                     Err(e) => {
@@ -96,7 +95,7 @@ impl RacketBridge {
                     break;
                 }
             }
-            log::info!("Racket stdin writer task exiting");
+            log::info!("Racket stdin writer thread exiting");
         });
 
         Ok(Self {

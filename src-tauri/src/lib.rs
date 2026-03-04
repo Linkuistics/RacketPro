@@ -7,13 +7,17 @@ use tauri::{Manager, State};
 
 /// Application state shared across all Tauri command handlers.
 pub struct AppState {
-    pub bridge: Arc<RacketBridge>,
+    pub bridge: Option<Arc<RacketBridge>>,
 }
 
 /// Tauri command: forward a JSON message from the WebView to the Racket process.
 #[tauri::command]
 fn send_to_racket(state: State<'_, AppState>, message: Value) -> Result<(), String> {
-    state.bridge.send(message)
+    state
+        .bridge
+        .as_ref()
+        .ok_or_else(|| "Racket bridge is not running".to_string())?
+        .send(message)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -38,25 +42,17 @@ pub fn run() {
             let script_str = script_path.to_string_lossy().to_string();
             log::info!("Racket script path: {script_str}");
 
-            match RacketBridge::start(app.handle().clone(), &script_str) {
-                Ok(bridge) => {
-                    app.manage(AppState {
-                        bridge: Arc::new(bridge),
-                    });
+            let bridge = match RacketBridge::start(app.handle().clone(), &script_str) {
+                Ok(b) => {
                     log::info!("Racket bridge started successfully");
+                    Some(Arc::new(b))
                 }
                 Err(e) => {
                     log::error!("Failed to start Racket bridge: {e}");
-                    // Provide a fallback AppState so commands don't panic when
-                    // there is no Racket runtime.  We still let the app run so
-                    // the UI can display an appropriate error.  The bridge will
-                    // simply reject any messages sent to it.
-                    //
-                    // NOTE: We do *not* manage state here — commands that depend
-                    // on AppState will return an internal error, which the
-                    // frontend can surface to the user.
+                    None
                 }
-            }
+            };
+            app.manage(AppState { bridge });
 
             Ok(())
         })
