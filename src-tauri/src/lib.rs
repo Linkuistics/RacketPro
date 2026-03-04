@@ -1,4 +1,5 @@
 mod bridge;
+mod fs;
 mod pty;
 
 use bridge::RacketBridge;
@@ -104,6 +105,7 @@ pub fn run() {
                 }
             }
         })
+        .plugin(tauri_plugin_dialog::init())
         .manage(PtyManager::new())
         .invoke_handler(tauri::generate_handler![
             send_to_racket,
