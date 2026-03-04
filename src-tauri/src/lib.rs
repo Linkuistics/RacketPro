@@ -36,10 +36,12 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             // Resolve the Racket script path.
-            // First try relative to the current working directory, then fall
-            // back to the Tauri resource directory.
+            // Use CARGO_MANIFEST_DIR (src-tauri/) at compile time to find the
+            // project root, so the path works regardless of runtime CWD.
             let script_path = {
-                let local = std::path::PathBuf::from("./racket/mrracket-core/main.rkt");
+                let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+                let project_root = manifest_dir.parent().unwrap();
+                let local = project_root.join("racket/mrracket-core/main.rkt");
                 if local.exists() {
                     local
                 } else {

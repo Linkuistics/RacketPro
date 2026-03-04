@@ -18,7 +18,7 @@ Primary languages: Racket, Rhombus, and SyntaxSpec.
 ### Core Principle: Racket Drives Everything
 
 ```
-Svelte Frontend (WebView)    → Rendering surface (Lit Web Components)
+Frontend (WebView)           → Rendering surface (Lit Web Components, no framework)
 Rust Backend (Tauri)         → Thin bridge (process management, PTY, OS plumbing)
 Racket Core                  → The brain (UI model, IDE logic, extensions)
 ```
