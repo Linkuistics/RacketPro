@@ -3,7 +3,7 @@
 // The Racket process sends a layout tree (via the "layout:set" message)
 // describing the UI as a nested structure of primitive types (vbox, hbox,
 // heading, text, button, etc.).  This module turns that tree into a live
-// DOM tree of `mr-<type>` custom elements.
+// DOM tree of `hm-<type>` custom elements.
 
 import { onMessage } from './bridge.js';
 
@@ -11,7 +11,7 @@ import { onMessage } from './bridge.js';
 let root = null;
 
 /**
- * Create a `mr-<type>` custom element from a node descriptor, set its
+ * Create a `hm-<type>` custom element from a node descriptor, set its
  * properties, and recursively render its children.
  *
  * @param {object} node — { type, props, children }
@@ -20,7 +20,7 @@ let root = null;
 export function renderNode(node, parent, index = 0) {
   if (!node || !node.type) return;
 
-  const tagName = `mr-${node.type}`;
+  const tagName = `hm-${node.type}`;
   const el = document.createElement(tagName);
 
   // Copy props to the element. Hyphenated Racket props are set as HTML
@@ -55,9 +55,11 @@ export function renderNode(node, parent, index = 0) {
     });
   }
 
-  // Assign named slots for mr-split children
-  if (parent && parent.tagName === 'MR-SPLIT') {
+  // Assign named slots for hm-split children and ensure they fill the pane
+  if (parent && parent.tagName === 'HM-SPLIT') {
     el.slot = index === 0 ? 'first' : 'second';
+    el.style.width = '100%';
+    el.style.height = '100%';
   }
 
   parent.appendChild(el);
@@ -73,12 +75,15 @@ export function setLayout(tree) {
     console.error('[renderer] No root container — call initRenderer() first');
     return;
   }
-  // Clear existing content and reset any inline styles from the loading state
+  // Clear existing content and switch from centered loading layout to
+  // a full-height flex column that stretches to fill the viewport.
   root.textContent = '';
-  root.style.display = '';
-  root.style.alignItems = '';
-  root.style.justifyContent = '';
+  root.style.display = 'flex';
+  root.style.flexDirection = 'column';
+  root.style.alignItems = 'stretch';
+  root.style.justifyContent = 'stretch';
   root.style.fontSize = '';
+  root.style.overflow = 'hidden';
   renderNode(tree, root);
   console.debug('[renderer] Layout rendered');
 }

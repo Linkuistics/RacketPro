@@ -1,4 +1,4 @@
-// primitives/editor.js — mr-editor
+// primitives/editor.js — hm-editor
 //
 // Monaco Editor wrapper as a Lit Web Component.  Dynamically imports the
 // vendored Monaco bundle, registers the Racket language (once), and creates
@@ -13,6 +13,8 @@
 //   editor:save-request   — Cmd/Ctrl+S with { path, content }
 
 import { LitElement, html, css } from 'lit';
+import { effect } from '@preact/signals-core';
+import { getCell } from '../cells.js';
 import { onMessage, dispatch } from '../bridge.js';
 import {
   racketLanguageId,
@@ -35,10 +37,10 @@ function registerRacketLanguage(monaco) {
   monaco.languages.setLanguageConfiguration(racketLanguageId, racketLanguageConfig);
   monaco.languages.setMonarchTokensProvider(racketLanguageId, racketTokenProvider);
   racketRegistered = true;
-  console.log('[mr-editor] Racket language registered');
+  console.log('[hm-editor] Racket language registered');
 }
 
-class MrEditor extends LitElement {
+class HmEditor extends LitElement {
   static properties = {
     filePath:  { type: String, attribute: 'file-path' },
     language:  { type: String },
@@ -53,6 +55,11 @@ class MrEditor extends LitElement {
       height: 100%;
       position: relative;
       overflow: hidden;
+      box-sizing: border-box;
+    }
+
+    :host([hidden]) {
+      display: none;
     }
 
     #editor-container {
@@ -80,6 +87,7 @@ class MrEditor extends LitElement {
     this._changeDisposable = null;
     /** @type {import('monaco-editor').monaco.IDisposable|null} */
     this._saveDisposable = null;
+    this._disposeVisibility = null;
   }
 
   render() {
@@ -94,8 +102,16 @@ class MrEditor extends LitElement {
       await this._initMonaco();
       this._setupBridgeListeners();
     } catch (err) {
-      console.error('[mr-editor] Failed to initialise Monaco:', err);
+      console.error('[hm-editor] Failed to initialise Monaco:', err);
     }
+    // Hide editor when no file is open
+    setTimeout(() => {
+      const cell = getCell('current-file');
+      this._disposeVisibility = effect(() => {
+        const val = cell.value;
+        this.toggleAttribute('hidden', !val);
+      });
+    }, 0);
   }
 
   /**
@@ -112,7 +128,7 @@ class MrEditor extends LitElement {
 
     const container = this.shadowRoot.getElementById('editor-container');
     if (!container) {
-      console.error('[mr-editor] Editor container not found');
+      console.error('[hm-editor] Editor container not found');
       return;
     }
 
@@ -123,8 +139,9 @@ class MrEditor extends LitElement {
       readOnly: this.readOnly,
       automaticLayout: true,
       minimap: { enabled: false },
-      fontSize: 14,
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+      fontSize: 13,
+      fontWeight: '300',
+      fontFamily: "'OperatorMonoSSm Nerd Font Mono', 'SF Mono', 'Fira Code', Menlo, monospace",
       tabSize: 2,
       scrollBeyondLastLine: false,
     });
@@ -141,7 +158,7 @@ class MrEditor extends LitElement {
     const KeyMod = monaco.KeyMod;
     const KeyCode = monaco.KeyCode;
     this._saveDisposable = this._editor.addAction({
-      id: 'mr-editor-save',
+      id: 'hm-editor-save',
       label: 'Save File',
       keybindings: [KeyMod.CtrlCmd | KeyCode.KeyS],
       run: () => {
@@ -153,7 +170,7 @@ class MrEditor extends LitElement {
       },
     });
 
-    console.log('[mr-editor] Monaco editor created');
+    console.log('[hm-editor] Monaco editor created');
   }
 
   /**
@@ -173,6 +190,11 @@ class MrEditor extends LitElement {
           if (model && language) {
             this._monaco.editor.setModelLanguage(model, language);
           }
+          // Suppress editor:dirty dispatch during programmatic setValue —
+          // Monaco fires onDidChangeModelContent synchronously, and
+          // dispatching back to Racket during a Tauri event callback
+          // deadlocks WKWebView.
+          this._dirty = true;
           this._editor.setValue(content || '');
           this._dirty = false;
         }
@@ -184,6 +206,7 @@ class MrEditor extends LitElement {
       onMessage('editor:set-content', (msg) => {
         const { content } = msg;
         if (this._editor) {
+          this._dirty = true;
           this._editor.setValue(content || '');
           this._dirty = false;
         }
@@ -208,6 +231,11 @@ class MrEditor extends LitElement {
   disconnectedCallback() {
     super.disconnectedCallback();
 
+    if (this._disposeVisibility) {
+      this._disposeVisibility();
+      this._disposeVisibility = null;
+    }
+
     // Dispose Monaco resources
     if (this._changeDisposable) {
       this._changeDisposable.dispose();
@@ -228,8 +256,8 @@ class MrEditor extends LitElement {
     }
     this._unsubs = [];
 
-    console.log('[mr-editor] Editor disposed');
+    console.log('[hm-editor] Editor disposed');
   }
 }
 
-customElements.define('mr-editor', MrEditor);
+customElements.define('hm-editor', HmEditor);

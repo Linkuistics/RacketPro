@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 
 /// Manages a child Racket process, routing JSON-RPC messages between the
@@ -23,6 +23,8 @@ pub struct RacketBridge {
     pending: Arc<Mutex<Vec<(String, Value)>>>,
     /// Tauri app handle, used to emit events when flushing.
     app_handle: AppHandle,
+    /// PTY manager, needed to process deferred pty:create messages.
+    pty_manager: PtyManager,
 }
 
 /// Convert a Racket-style shortcut string (e.g. "Cmd+Shift+Z") to a Tauri
@@ -57,6 +59,45 @@ fn handle_menu_set(app: &AppHandle, menu_data: &Value) {
         }
     };
 
+    // On macOS, the first submenu is always the "application menu" (shown
+    // under the app name).  Prepend a standard one so that "File" appears
+    // in its expected position as the second submenu.
+    #[cfg(target_os = "macos")]
+    {
+        let mut app_submenu = SubmenuBuilder::new(app, "HeavyMental");
+        if let Ok(item) = PredefinedMenuItem::about(app, Some("About HeavyMental"), None) {
+            app_submenu = app_submenu.item(&item);
+        }
+        app_submenu = app_submenu.separator();
+        if let Ok(item) = PredefinedMenuItem::services(app, Some("Services")) {
+            app_submenu = app_submenu.item(&item);
+        }
+        app_submenu = app_submenu.separator();
+        if let Ok(item) = PredefinedMenuItem::hide(app, Some("Hide HeavyMental")) {
+            app_submenu = app_submenu.item(&item);
+        }
+        if let Ok(item) = PredefinedMenuItem::hide_others(app, Some("Hide Others")) {
+            app_submenu = app_submenu.item(&item);
+        }
+        if let Ok(item) = PredefinedMenuItem::show_all(app, Some("Show All")) {
+            app_submenu = app_submenu.item(&item);
+        }
+        app_submenu = app_submenu.separator();
+        if let Ok(item) = PredefinedMenuItem::quit(app, Some("Quit HeavyMental")) {
+            app_submenu = app_submenu.item(&item);
+        }
+        match app_submenu.build() {
+            Ok(built) => {
+                if let Err(e) = menu.append(&built) {
+                    log::error!("Failed to append macOS app submenu: {e}");
+                }
+            }
+            Err(e) => {
+                log::error!("Failed to build macOS app submenu: {e}");
+            }
+        }
+    }
+
     for submenu_def in items {
         let label = submenu_def
             .get("label")
@@ -87,6 +128,24 @@ fn handle_menu_set(app: &AppHandle, menu_data: &Value) {
 
             // Check for well-known predefined items
             match action {
+                Some("undo") => {
+                    match PredefinedMenuItem::undo(app, Some(child_label)) {
+                        Ok(item) => {
+                            submenu = submenu.item(&item);
+                        }
+                        Err(e) => log::error!("Failed to create Undo item: {e}"),
+                    }
+                    continue;
+                }
+                Some("redo") => {
+                    match PredefinedMenuItem::redo(app, Some(child_label)) {
+                        Ok(item) => {
+                            submenu = submenu.item(&item);
+                        }
+                        Err(e) => log::error!("Failed to create Redo item: {e}"),
+                    }
+                    continue;
+                }
                 Some("quit") => {
                     match PredefinedMenuItem::quit(app, Some(child_label)) {
                         Ok(item) => {
@@ -170,6 +229,24 @@ fn handle_menu_set(app: &AppHandle, menu_data: &Value) {
         log::error!("Failed to set menu on app: {e}");
     } else {
         log::info!("Native menu set successfully from Racket menu:set message");
+    }
+}
+
+/// Process a single message from Racket: intercept if appropriate, otherwise
+/// forward to the frontend via a Tauri event.
+fn process_message(
+    msg_type: &str,
+    msg: &Value,
+    app: &AppHandle,
+    tx: &mpsc::Sender<Value>,
+    pty: &PtyManager,
+) {
+    let intercepted = handle_intercepted_message(msg_type, msg, app, tx, pty);
+    if !intercepted {
+        let event_name = format!("racket:{msg_type}");
+        if let Err(e) = app.emit(&event_name, msg) {
+            log::error!("Failed to emit Tauri event {event_name}: {e}");
+        }
     }
 }
 
@@ -393,6 +470,69 @@ fn handle_intercepted_message(
             true
         }
 
+        // ----- JS Eval (Racket → WebView → Racket) --------------------------
+        "eval:exec" => {
+            let id = msg
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let code = msg
+                .get("code")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let app_caller = app.clone();
+            let app_inner = app.clone();
+
+            // Run eval on the main thread where the WebView lives
+            let _ = app_caller.run_on_main_thread(move || {
+                if let Some(window) = app_inner.get_webview_window("main") {
+                    // Wrap the code to:
+                    // 1. Execute it (async-capable)
+                    // 2. Capture the return value or error
+                    // 3. Send the result back to Racket via send_to_racket
+                    let escaped_id = id.replace('\\', "\\\\").replace('"', "\\\"");
+                    let wrapped = format!(
+                        r#"(async function() {{
+    try {{
+        var __result = await (async function() {{ {code} }})();
+        var __val;
+        if (__result === undefined) {{
+            __val = null;
+        }} else if (typeof __result === 'object') {{
+            try {{ __val = JSON.parse(JSON.stringify(__result)); }} catch(e) {{ __val = String(__result); }}
+        }} else {{
+            __val = __result;
+        }}
+        window.__TAURI__.core.invoke('send_to_racket', {{ message: {{
+            type: 'eval:result',
+            id: "{escaped_id}",
+            value: __val
+        }} }});
+    }} catch(e) {{
+        window.__TAURI__.core.invoke('send_to_racket', {{ message: {{
+            type: 'eval:error',
+            id: "{escaped_id}",
+            error: e.message,
+            stack: e.stack || ''
+        }} }});
+    }}
+}})()"#
+                    );
+                    if let Err(e) = window.eval(&wrapped) {
+                        log::error!("eval:exec failed for id={id}: {e}");
+                        let _ = app_inner.emit("racket:eval:error", serde_json::json!({
+                            "type": "eval:error",
+                            "id": id,
+                            "error": format!("Rust eval error: {e}"),
+                        }));
+                    }
+                }
+            });
+            true
+        }
+
         // Not intercepted — forward to frontend
         _ => false,
     }
@@ -460,7 +600,7 @@ impl RacketBridge {
         let reader_ready = Arc::clone(&ready);
         let reader_pending = Arc::clone(&pending);
         let reader_tx = tx.clone();
-        let reader_pty = pty_manager;
+        let reader_pty = pty_manager.clone();
         thread::spawn(move || {
             let reader = BufReader::new(stdout);
             for line in reader.lines() {
@@ -477,35 +617,25 @@ impl RacketBridge {
                                     .unwrap_or("unknown")
                                     .to_string();
 
-                                let intercepted =
-                                    handle_intercepted_message(
-                                        &msg_type,
-                                        &msg,
-                                        &reader_handle,
-                                        &reader_tx,
-                                        &reader_pty,
-                                    );
-
-                                if intercepted {
+                                // Queue ALL messages until the frontend is ready.
+                                // This prevents intercepted handlers (menu:set,
+                                // pty:create) from touching the main thread or
+                                // emitting events while WKWebView is still loading,
+                                // which can cause a deadlock on macOS.
+                                if !reader_ready.load(Ordering::Acquire) {
+                                    if let Ok(mut q) = reader_pending.lock() {
+                                        q.push((msg_type, msg));
+                                    }
                                     continue;
                                 }
 
-                                // Forward non-intercepted messages to the frontend.
-                                let event_name = format!("racket:{msg_type}");
-
-                                // Queue messages until the frontend signals readiness
-                                if !reader_ready.load(Ordering::Acquire) {
-                                    log::info!("Queuing message (frontend not ready): {event_name}");
-                                    if let Ok(mut q) = reader_pending.lock() {
-                                        q.push((event_name, msg));
-                                    }
-                                } else if let Err(e) =
-                                    reader_handle.emit(&event_name, &msg)
-                                {
-                                    log::error!(
-                                        "Failed to emit Tauri event {event_name}: {e}"
-                                    );
-                                }
+                                process_message(
+                                    &msg_type,
+                                    &msg,
+                                    &reader_handle,
+                                    &reader_tx,
+                                    &reader_pty,
+                                );
                             }
                             Err(e) => {
                                 log::warn!(
@@ -529,6 +659,7 @@ impl RacketBridge {
             ready,
             pending,
             app_handle,
+            pty_manager,
         })
     }
 
@@ -542,7 +673,7 @@ impl RacketBridge {
     /// Flush all queued messages to the frontend and mark as ready.
     /// Called once when the frontend signals that its listeners are registered.
     pub fn flush_pending(&self) {
-        // Set ready first so the reader thread starts emitting directly
+        // Set ready first so the reader thread starts processing directly
         self.ready.store(true, Ordering::Release);
 
         let queued: Vec<(String, Value)> = {
@@ -550,11 +681,15 @@ impl RacketBridge {
             std::mem::take(&mut *q)
         };
 
-        log::info!("Flushing {} queued messages to frontend", queued.len());
-        for (event_name, msg) in queued {
-            if let Err(e) = self.app_handle.emit(&event_name, &msg) {
-                log::error!("Failed to emit queued event {event_name}: {e}");
-            }
+        log::info!("Flushing {} queued messages", queued.len());
+        for (msg_type, msg) in queued {
+            process_message(
+                &msg_type,
+                &msg,
+                &self.app_handle,
+                &self.tx,
+                &self.pty_manager,
+            );
         }
     }
 

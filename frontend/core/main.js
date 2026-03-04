@@ -13,16 +13,19 @@ import './primitives/split.js';
 import './primitives/chrome.js';
 import './primitives/editor.js';
 import './primitives/terminal.js';
+import './primitives/tabs.js';
+import './primitives/filetree.js';
+import './primitives/panel-header.js';
 
 async function boot() {
-  console.log('[MrRacket] Booting...');
+  console.log('[HeavyMental] Booting...');
   await initBridge();
   initCells();
   const app = document.getElementById('app');
   app.textContent = '';
   initRenderer(app);
-  onMessage('lifecycle:ready', () => console.log('[MrRacket] Racket core is ready'));
-  console.log('[MrRacket] Frontend ready, waiting for Racket...');
+  onMessage('lifecycle:ready', () => console.log('[HeavyMental] Racket core is ready'));
+  console.log('[HeavyMental] Frontend ready, waiting for Racket...');
 }
 
-boot().catch(e => console.error('[MrRacket] Boot failed:', e));
+boot().catch(e => console.error('[HeavyMental] Boot failed:', e));

@@ -1,8 +1,8 @@
-// primitives/split.js — mr-split
+// primitives/split.js — hm-split
 //
 // Resizable split pane component.  Divides its area into two panes with
-// a draggable divider.  Children are assigned to named slots "first" and
-// "second" by the renderer.
+// a draggable sash (VS Code-style).  Children are assigned to named
+// slots "first" and "second" by the renderer.
 //
 // Properties:
 //   direction  — "vertical" (top/bottom) or "horizontal" (left/right)
@@ -11,9 +11,9 @@
 
 import { LitElement, html, css } from 'lit';
 
-class MrSplit extends LitElement {
+class HmSplit extends LitElement {
   static properties = {
-    direction: { type: String },
+    direction: { type: String, reflect: true },
     ratio:     { type: Number },
     minSize:   { type: Number, attribute: 'min-size' },
   };
@@ -27,19 +27,78 @@ class MrSplit extends LitElement {
     }
     :host([direction='horizontal']) { flex-direction: row; }
     :host([direction='vertical'])   { flex-direction: column; }
+
     .pane {
       overflow: hidden;
       position: relative;
     }
-    .divider {
+
+    /* ── VS Code-style sash ─────────────────────────────── */
+    .sash {
       flex-shrink: 0;
-      background: var(--mr-divider-color, #e0e0e0);
+      position: relative;
       z-index: 10;
+      background: transparent;
     }
-    :host([direction='vertical']) .divider   { height: 4px; cursor: row-resize; }
-    :host([direction='horizontal']) .divider { width: 4px; cursor: col-resize; }
-    .divider:hover {
-      background: var(--mr-divider-hover, #90caf9);
+
+    /* Thin border line at rest */
+    .sash::before {
+      content: '';
+      position: absolute;
+      transition: background 0.15s ease;
+      background: var(--border, #E5E5E5);
+    }
+
+    /* On hover: reveal the colored bar */
+    .sash:hover::before {
+      background: var(--divider-hover, #007ACC);
+    }
+
+    /* Vertical split: horizontal sash */
+    :host([direction='vertical']) .sash {
+      height: 5px;
+      cursor: row-resize;
+      margin: -2px 0;
+    }
+    :host([direction='vertical']) .sash::before {
+      left: 0;
+      right: 0;
+      top: 2px;
+      height: 1px;
+    }
+    :host([direction='vertical']) .sash:hover::before {
+      top: 1px;
+      height: 3px;
+    }
+
+    /* Horizontal split: vertical sash */
+    :host([direction='horizontal']) .sash {
+      width: 5px;
+      cursor: col-resize;
+      margin: 0 -2px;
+    }
+    :host([direction='horizontal']) .sash::before {
+      top: 0;
+      bottom: 0;
+      left: 2px;
+      width: 1px;
+    }
+    :host([direction='horizontal']) .sash:hover::before {
+      left: 1px;
+      width: 3px;
+    }
+
+    /* During drag: keep sash highlighted */
+    .sash.dragging::before {
+      background: var(--divider-hover, #007ACC);
+    }
+    :host([direction='vertical']) .sash.dragging::before {
+      top: 1px;
+      height: 3px;
+    }
+    :host([direction='horizontal']) .sash.dragging::before {
+      left: 1px;
+      width: 3px;
     }
   `;
 
@@ -63,7 +122,7 @@ class MrSplit extends LitElement {
 
     return html`
       <div class="pane" style="${firstStyle}"><slot name="first"></slot></div>
-      <div class="divider" @mousedown=${this._startDrag}></div>
+      <div class="sash" @mousedown=${this._startDrag}></div>
       <div class="pane" style="${secondStyle}"><slot name="second"></slot></div>
     `;
   }
@@ -72,6 +131,8 @@ class MrSplit extends LitElement {
     e.preventDefault();
     const rect = this.getBoundingClientRect();
     const isVert = this.direction === 'vertical';
+    const sash = this.shadowRoot.querySelector('.sash');
+    sash?.classList.add('dragging');
 
     const onMove = (ev) => {
       const pos   = isVert ? ev.clientY - rect.top : ev.clientX - rect.left;
@@ -81,6 +142,7 @@ class MrSplit extends LitElement {
     };
 
     const onUp = () => {
+      sash?.classList.remove('dragging');
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
     };
@@ -90,4 +152,4 @@ class MrSplit extends LitElement {
   }
 }
 
-customElements.define('mr-split', MrSplit);
+customElements.define('hm-split', HmSplit);

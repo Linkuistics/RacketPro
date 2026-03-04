@@ -1,4 +1,5 @@
 mod bridge;
+mod debug;
 mod fs;
 mod pty;
 
@@ -38,6 +39,12 @@ fn pty_input(id: String, data: String, state: State<'_, PtyManager>) -> Result<(
     state.write(&id, &data)
 }
 
+/// Tauri command: list directory contents for the file tree.
+#[tauri::command]
+fn list_dir(path: String, show_hidden: bool) -> Result<Vec<fs::DirEntry>, String> {
+    fs::list_dir(&path, show_hidden)
+}
+
 /// Tauri command: resize a PTY instance (terminal dimensions changed).
 #[tauri::command]
 fn pty_resize(
@@ -51,9 +58,26 @@ fn pty_resize(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Clear debug output from previous run
+    debug::reset();
+
+    // Devtools plugin must be initialized as early as possible.
+    // It sets up a tracing subscriber, so we skip env_logger in debug builds
+    // to avoid the "logger already initialized" panic.
+    #[cfg(debug_assertions)]
+    let devtools = tauri_plugin_devtools::init();
+
+    #[cfg(not(debug_assertions))]
     env_logger::init();
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(debug_assertions)]
+    {
+        builder = builder.plugin(devtools);
+    }
+
+    builder
         .setup(|app| {
             // Resolve the Racket script path.
             // Use CARGO_MANIFEST_DIR (src-tauri/) at compile time to find the
@@ -61,14 +85,14 @@ pub fn run() {
             let script_path = {
                 let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
                 let project_root = manifest_dir.parent().unwrap();
-                let local = project_root.join("racket/mrracket-core/main.rkt");
+                let local = project_root.join("racket/heavymental-core/main.rkt");
                 if local.exists() {
                     local
                 } else {
                     app.path()
                         .resource_dir()
                         .unwrap_or_default()
-                        .join("racket/mrracket-core/main.rkt")
+                        .join("racket/heavymental-core/main.rkt")
                 }
             };
 
@@ -95,6 +119,12 @@ pub fn run() {
             app.manage(AppState { bridge });
             app.manage(pty_manager);
 
+            // Debug: file-based JS eval loop for unattended debugging.
+            // Write JS to /tmp/heavymental-debug/eval-input.js → result appears
+            // in eval-output.txt.  WebKit DevTools: use Cmd+Option+I manually.
+            #[cfg(debug_assertions)]
+            debug::start_eval_watcher(app.handle().clone());
+
             Ok(())
         })
         .on_menu_event(|app, event| {
@@ -119,6 +149,9 @@ pub fn run() {
             frontend_ready,
             pty_input,
             pty_resize,
+            list_dir,
+            debug::debug_log,
+            debug::debug_write,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

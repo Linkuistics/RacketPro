@@ -1,6 +1,6 @@
 #lang info
-(define collection "mrracket")
+(define collection "heavymental")
 (define deps '("base"))
 (define build-deps '("rackunit-lib"))
-(define pkg-desc "MrRacket core bridge library")
+(define pkg-desc "HeavyMental core bridge library")
 (define version "0.1.0")

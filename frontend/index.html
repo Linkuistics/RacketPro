@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MrRacket</title>
+  <title>HeavyMental</title>
   <link rel="stylesheet" href="./style/reset.css">
   <link rel="stylesheet" href="./vendor/monaco/monaco-editor.css">
   <link rel="stylesheet" href="./vendor/xterm/xterm.css">
@@ -18,9 +18,105 @@
     }
   }
   </script>
+  <!-- Monaco: disable web workers (WKWebView can't create blob: Workers).
+       Return a no-op stub so Monaco doesn't crash trying to postMessage. -->
+  <script>
+  (function() {
+    var stub = {
+      onmessage: null,
+      postMessage: function() {},
+      terminate: function() {},
+      addEventListener: function() {},
+      removeEventListener: function() {},
+      dispatchEvent: function() { return false; }
+    };
+    Object.defineProperty(self, 'MonacoEnvironment', {
+      get: function() { return self.__monacoEnv; },
+      set: function(v) {
+        console.log('[MonacoEnv] SET called, wrapping getWorker. New value:', typeof v);
+        var orig = v && v.getWorker;
+        v.getWorker = function(moduleId, label) {
+          console.log('[MonacoEnv] getWorker called:', moduleId, label);
+          return stub;
+        };
+        self.__monacoEnv = v;
+      },
+      configurable: true
+    });
+    self.MonacoEnvironment = { getWorker: function(m, l) {
+      console.log('[MonacoEnv] getWorker called:', m, l);
+      return stub;
+    }};
+  })();
+  </script>
+  <!-- Debug harness: capture console output + DOM snapshots to /tmp/heavymental-debug/ -->
+  <script>
+  (function() {
+    var _logs = [];
+    var _orig = {
+      log:   console.log.bind(console),
+      error: console.error.bind(console),
+      warn:  console.warn.bind(console),
+      debug: console.debug.bind(console)
+    };
+
+    function ts() { return new Date().toISOString(); }
+
+    function str(a) {
+      if (a instanceof Error) return a.message + '\n' + a.stack;
+      if (typeof a === 'object') { try { return JSON.stringify(a); } catch(e) { return String(a); } }
+      return String(a);
+    }
+
+    function intercept(origFn, tag) {
+      return function() {
+        var args = Array.prototype.slice.call(arguments);
+        _logs.push('[' + ts() + '] [' + tag + '] ' + args.map(str).join(' '));
+        origFn.apply(console, args);
+      };
+    }
+
+    console.log   = intercept(_orig.log,   'LOG');
+    console.error = intercept(_orig.error, 'ERR');
+    console.warn  = intercept(_orig.warn,  'WRN');
+    console.debug = intercept(_orig.debug, 'DBG');
+
+    window.addEventListener('error', function(e) {
+      _logs.push('[' + ts() + '] [UNCAUGHT] ' + e.message + ' at ' + e.filename + ':' + e.lineno + ':' + e.colno);
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+      _logs.push('[' + ts() + '] [UNHANDLED] ' + e.reason);
+    });
+
+    // Flush buffered entries to Rust
+    function flush() {
+      if (_logs.length === 0) return;
+      var batch = _logs.splice(0);
+      var invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
+      if (invoke) invoke('debug_log', { entries: batch.join('\n') })['catch'](function(){});
+    }
+    setInterval(flush, 500);
+
+    // Auto-dump DOM 3s after load (layout should be rendered by then)
+    setTimeout(function() {
+      flush();
+      var invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
+      if (invoke) {
+        invoke('debug_write', { name: 'dom.html', content: document.documentElement.outerHTML })['catch'](function(){});
+      }
+    }, 3000);
+
+    // Expose helpers for manual use from devtools console
+    window.__debugFlush = flush;
+    window.__debugDumpDOM = function() {
+      var invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
+      if (invoke) invoke('debug_write', { name: 'dom.html', content: document.documentElement.outerHTML })['catch'](function(){});
+    };
+  })();
+  </script>
   <script type="module" src="./core/main.js"></script>
 </head>
 <body>
-  <div id="app">Loading MrRacket...</div>
+  <div id="app">Loading HeavyMental...</div>
 </body>
 </html>

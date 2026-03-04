@@ -37,7 +37,30 @@
     [(regexp-match? #rx"\\.rkt$" path) "racket"]
     [(regexp-match? #rx"\\.scrbl$" path) "racket"]
     [(regexp-match? #rx"\\.rhm$" path) "racket"]
+    [(regexp-match? #rx"\\.js$" path) "javascript"]
+    [(regexp-match? #rx"\\.ts$" path) "typescript"]
+    [(regexp-match? #rx"\\.rs$" path) "rust"]
+    [(regexp-match? #rx"\\.toml$" path) "toml"]
+    [(regexp-match? #rx"\\.json$" path) "json"]
+    [(regexp-match? #rx"\\.css$" path) "css"]
+    [(regexp-match? #rx"\\.html?$" path) "html"]
+    [(regexp-match? #rx"\\.md$" path) "markdown"]
     [else "plaintext"]))
+
+;; Human-readable language name for the status bar
+(define (language-display-name lang-id)
+  (cond
+    [(string=? lang-id "racket") "Racket"]
+    [(string=? lang-id "javascript") "JavaScript"]
+    [(string=? lang-id "typescript") "TypeScript"]
+    [(string=? lang-id "rust") "Rust"]
+    [(string=? lang-id "toml") "TOML"]
+    [(string=? lang-id "json") "JSON"]
+    [(string=? lang-id "css") "CSS"]
+    [(string=? lang-id "html") "HTML"]
+    [(string=? lang-id "markdown") "Markdown"]
+    [(string=? lang-id "plaintext") "Plain Text"]
+    [else lang-id]))
 
 ;; ── File operations ──────────────────────────────────────────
 
@@ -65,7 +88,8 @@
 (define (new-file)
   (cell-set! 'current-file "untitled.rkt")
   (cell-set! 'file-dirty #f)
-  (cell-set! 'title "MrRacket - untitled.rkt")
+  (cell-set! 'language "Racket")
+  (cell-set! 'title "HeavyMental — untitled.rkt")
   (cell-set! 'status "New file")
   (send-message! (make-message "editor:open"
                                'path "untitled.rkt"
@@ -84,7 +108,7 @@
      (cell-set! 'file-dirty #t)
      ;; Update title to show dirty indicator
      (define filename (path->filename (current-file-path)))
-     (cell-set! 'title (format "MrRacket - ~a *" filename))]
+     (cell-set! 'title (format "HeavyMental — ~a *" filename))]
 
     ["editor:save-request"
      ;; Frontend requests a save (e.g., Cmd+S)
@@ -103,15 +127,17 @@
      ;; Rust read a file successfully — update state and tell frontend
      (define path (message-ref msg 'path ""))
      (define content (message-ref msg 'content ""))
+     (define lang (detect-language path))
      (cell-set! 'current-file path)
      (cell-set! 'file-dirty #f)
+     (cell-set! 'language (language-display-name lang))
      (define filename (path->filename path))
-     (cell-set! 'title (format "MrRacket - ~a" filename))
+     (cell-set! 'title (format "HeavyMental — ~a" filename))
      (cell-set! 'status (format "Opened ~a" filename))
      (send-message! (make-message "editor:open"
                                   'path path
                                   'content content
-                                  'language (detect-language path)))]
+                                  'language lang))]
 
     ["file:write:result"
      ;; Rust wrote the file successfully
@@ -119,7 +145,7 @@
      (cell-set! 'current-file path)
      (cell-set! 'file-dirty #f)
      (define filename (path->filename path))
-     (cell-set! 'title (format "MrRacket - ~a" filename))
+     (cell-set! 'title (format "HeavyMental — ~a" filename))
      (cell-set! 'status (format "Saved ~a" filename))]
 
     ["file:read:error"

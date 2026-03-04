@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    mr_racket_lib::run()
+    heavy_mental_lib::run()
 }

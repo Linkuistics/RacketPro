@@ -4,10 +4,10 @@
          json
          racket/port
          racket/string
-         "../racket/mrracket-core/protocol.rkt"
-         "../racket/mrracket-core/cell.rkt"
-         "../racket/mrracket-core/editor.rkt"
-         "../racket/mrracket-core/repl.rkt")
+         "../racket/heavymental-core/protocol.rkt"
+         "../racket/heavymental-core/cell.rkt"
+         "../racket/heavymental-core/editor.rkt"
+         "../racket/heavymental-core/repl.rkt")
 
 ;; ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -27,14 +27,14 @@
     (lambda ()
       (cell-set! 'current-file "untitled.rkt")
       (cell-set! 'file-dirty #f)
-      (cell-set! 'title "MrRacket")
+      (cell-set! 'title "HeavyMental")
       (cell-set! 'status "starting"))))
 
 ;; ── Ensure cells exist ──────────────────────────────────────────────────────
 ;; define-cell must be called once at top level (macro expands to make-cell)
 (define-cell current-file "untitled.rkt")
 (define-cell file-dirty #f)
-(define-cell title "MrRacket")
+(define-cell title "HeavyMental")
 (define-cell status "starting")
 
 ;; ═══════════════════════════════════════════════════════════════════════════
@@ -142,7 +142,7 @@
       (cell-set! 'current-file "/home/user/demo.rkt")
       (handle-editor-event
        (make-message "event" 'name "editor:dirty"))))
-  (check-equal? (cell-ref 'title) "MrRacket - demo.rkt *"))
+  (check-equal? (cell-ref 'title) "HeavyMental - demo.rkt *"))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; Test: handle-file-result with file:read:result
@@ -177,7 +177,7 @@
        (make-message "file:read:result"
                      'path "/home/user/hello.rkt"
                      'content ""))))
-  (check-equal? (cell-ref 'title) "MrRacket - hello.rkt"))
+  (check-equal? (cell-ref 'title) "HeavyMental - hello.rkt"))
 
 (test-case "handle-file-result with file:read:result updates status"
   (reset-cells!)
@@ -249,11 +249,11 @@
       (new-file)))
   (check-equal? (cell-ref 'file-dirty) #f))
 
-(test-case "new-file sets title to MrRacket - untitled.rkt"
+(test-case "new-file sets title to HeavyMental - untitled.rkt"
   (reset-cells!)
   (with-output-to-string
     (lambda () (new-file)))
-  (check-equal? (cell-ref 'title) "MrRacket - untitled.rkt"))
+  (check-equal? (cell-ref 'title) "HeavyMental - untitled.rkt"))
 
 (test-case "new-file sets status to New file"
   (reset-cells!)

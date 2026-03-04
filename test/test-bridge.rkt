@@ -4,8 +4,8 @@
          json
          racket/port
          racket/string
-         "../racket/mrracket-core/protocol.rkt"
-         "../racket/mrracket-core/cell.rkt")
+         "../racket/heavymental-core/protocol.rkt"
+         "../racket/heavymental-core/cell.rkt")
 
 ;; ── Test 1: make-message creates valid JSON ──────────────────────────────────
 

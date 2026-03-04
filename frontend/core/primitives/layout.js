@@ -1,14 +1,24 @@
-// primitives/layout.js — mr-vbox, mr-hbox
+// primitives/layout.js — hm-vbox, hm-hbox
 //
 // Flex-based layout containers.  Children are projected via <slot>.
 // The Racket layout tree uses "vbox" and "hbox" types, which map to
-// mr-vbox (flex-direction: column) and mr-hbox (flex-direction: row).
+// hm-vbox (flex-direction: column) and hm-hbox (flex-direction: row).
+//
+// Properties like flex, gap, and padding are applied to :host directly
+// so the element participates correctly in the parent's flex context.
 
 import { LitElement, html, css } from 'lit';
 
-// ── mr-vbox ──────────────────────────────────────────────────
+/** Append "px" to bare numbers, pass through strings like "8px" or "auto". */
+function toPx(val) {
+  if (val === undefined || val === null) return '0';
+  const s = String(val);
+  return /^\d+$/.test(s) ? `${s}px` : s;
+}
 
-class MrVbox extends LitElement {
+// ── hm-vbox ──────────────────────────────────────────────────
+
+class HmVbox extends LitElement {
   static properties = {
     gap:     { type: String },
     padding: { type: String },
@@ -21,6 +31,7 @@ class MrVbox extends LitElement {
       display: flex;
       flex-direction: column;
       box-sizing: border-box;
+      overflow: hidden;
     }
   `;
 
@@ -32,37 +43,25 @@ class MrVbox extends LitElement {
     this.align = '';
   }
 
+  updated(changed) {
+    // Apply layout properties directly to :host so this element
+    // participates correctly in the parent's flex context.
+    if (changed.has('flex'))    this.style.flex    = this.flex || '';
+    if (changed.has('gap'))     this.style.gap     = toPx(this.gap);
+    if (changed.has('padding')) this.style.padding = toPx(this.padding);
+    if (changed.has('align'))   this.style.alignItems = this.align || '';
+  }
+
   render() {
-    const s = {
-      gap: this._px(this.gap),
-      padding: this._px(this.padding),
-    };
-    if (this.flex)  s.flex = this.flex;
-    if (this.align) s.alignItems = this.align;
-
-    return html`<div style="${this._styleString(s)}"><slot></slot></div>`;
-  }
-
-  /** Append "px" to bare numbers, pass through strings like "8px" or "auto". */
-  _px(val) {
-    if (val === undefined || val === null) return '0';
-    const s = String(val);
-    return /^\d+$/.test(s) ? `${s}px` : s;
-  }
-
-  _styleString(obj) {
-    return Object.entries(obj)
-      .filter(([, v]) => v !== undefined && v !== '')
-      .map(([k, v]) => `${k.replace(/[A-Z]/g, m => '-' + m.toLowerCase())}:${v}`)
-      .join(';');
+    return html`<slot></slot>`;
   }
 }
 
-customElements.define('mr-vbox', MrVbox);
+customElements.define('hm-vbox', HmVbox);
 
-// ── mr-hbox ──────────────────────────────────────────────────
+// ── hm-hbox ──────────────────────────────────────────────────
 
-class MrHbox extends LitElement {
+class HmHbox extends LitElement {
   static properties = {
     gap:     { type: String },
     padding: { type: String },
@@ -75,6 +74,7 @@ class MrHbox extends LitElement {
       display: flex;
       flex-direction: row;
       box-sizing: border-box;
+      overflow: hidden;
     }
   `;
 
@@ -86,29 +86,16 @@ class MrHbox extends LitElement {
     this.align = '';
   }
 
+  updated(changed) {
+    if (changed.has('flex'))    this.style.flex    = this.flex || '';
+    if (changed.has('gap'))     this.style.gap     = toPx(this.gap);
+    if (changed.has('padding')) this.style.padding = toPx(this.padding);
+    if (changed.has('align'))   this.style.alignItems = this.align || '';
+  }
+
   render() {
-    const s = {
-      gap: this._px(this.gap),
-      padding: this._px(this.padding),
-    };
-    if (this.flex)  s.flex = this.flex;
-    if (this.align) s.alignItems = this.align;
-
-    return html`<div style="${this._styleString(s)}"><slot></slot></div>`;
-  }
-
-  _px(val) {
-    if (val === undefined || val === null) return '0';
-    const s = String(val);
-    return /^\d+$/.test(s) ? `${s}px` : s;
-  }
-
-  _styleString(obj) {
-    return Object.entries(obj)
-      .filter(([, v]) => v !== undefined && v !== '')
-      .map(([k, v]) => `${k.replace(/[A-Z]/g, m => '-' + m.toLowerCase())}:${v}`)
-      .join(';');
+    return html`<slot></slot>`;
   }
 }
 
-customElements.define('mr-hbox', MrHbox);
+customElements.define('hm-hbox', HmHbox);

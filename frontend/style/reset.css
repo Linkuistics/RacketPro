@@ -1,21 +1,84 @@
+/* ── VS Code Light Theme Palette ──────────────────────────── */
 :root {
-  --bg-primary: #1e1e2e;
-  --fg-primary: #cdd6f4;
-  --accent: #89b4fa;
+  /* Backgrounds */
+  --bg-primary:       #FFFFFF;
+  --bg-secondary:     #F3F3F3;
+  --bg-toolbar:       #F8F8F8;
+  --bg-terminal:      #FFFFFF;
+
+  /* Foregrounds */
+  --fg-primary:       #333333;
+  --fg-secondary:     #616161;
+  --fg-muted:         #999999;
+
+  /* Accent */
+  --accent:           #007ACC;
+  --accent-hover:     #0062A3;
+
+  /* Borders & Dividers — slightly darker for visibility */
+  --border:           #D4D4D4;
+  --border-strong:    #C0C0C0;
+  --divider:          #D4D4D4;
+  --divider-hover:    #007ACC;
+
+  /* Semantic */
+  --danger:           #D32F2F;
+
+  /* Typography */
+  --font-sans:        -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono:        "SF Mono", "Fira Code", "Cascadia Code", Menlo, monospace;
+  --font-editor:      "OperatorMonoSSm Nerd Font Mono", "SF Mono", "Fira Code", Menlo, monospace;
+  --font-editor-size: 13px;
+  --font-editor-weight: 300;
+
+  /* Sidebar / File Tree */
+  --sidebar-width:    220px;
+  --bg-sidebar:       #F8F8F8;
+  --fg-sidebar:       #333333;
+  --fg-sidebar-muted: #616161;
+  --sidebar-indent:   16px;
+  --sidebar-item-h:   26px;
+  --bg-sidebar-hover: #E8E8E8;
+  --bg-sidebar-active:#D6EBFF;
+
+  /* Tabs (Zed-style) */
+  --tab-h:            32px;
+  --bg-tab-bar:       #EAEAEA;
+  --bg-tab-hover:     #F0F0F0;
+  --fg-tab:           #888888;
+  --fg-tab-active:    #333333;
+
+  /* Panel Headers */
+  --panel-header-h:   28px;
+  --bg-panel-header:  #F3F3F3;
+  --fg-panel-header:  #616161;
+
+  /* Status Bar */
+  --statusbar-h:      28px;
+  --bg-statusbar:     #E8E8E8;
+  --fg-statusbar:     #616161;
 }
 
+/* ── Reset ───────────────────────────────────────────────── */
+/* NOTE: Do NOT put padding:0 on * — it overrides Shadow DOM
+   :host padding on all custom elements (external styles beat :host). */
 *,
 *::before,
 *::after {
   margin: 0;
-  padding: 0;
   box-sizing: border-box;
+}
+
+html, body, h1, h2, h3, h4, h5, h6, p, ul, ol, dl,
+figure, blockquote, fieldset, pre {
+  padding: 0;
 }
 
 html, body {
   height: 100%;
-  font-family: system-ui, -apple-system, sans-serif;
-  background-color: var(--bg-primary);
+  overflow: hidden;
+  font-family: var(--font-sans);
+  background: var(--bg-secondary);
   color: var(--fg-primary);
 }
 
@@ -24,5 +87,7 @@ html, body {
   align-items: center;
   justify-content: center;
   height: 100%;
+  overflow: hidden;
   font-size: 1.25rem;
+  border-top: 1px solid var(--border);
 }

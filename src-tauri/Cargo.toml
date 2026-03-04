@@ -1,21 +1,22 @@
 [package]
-name = "mr-racket"
+name = "heavy-mental"
 version = "0.1.0"
 edition = "2021"
 description = "A Racket-driven IDE built on Tauri"
 
 [lib]
-name = "mr_racket_lib"
+name = "heavy_mental_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["devtools"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"
 env_logger = "0.11"
 portable-pty = "0.9"
 tauri-plugin-dialog = "2"
+tauri-plugin-devtools = "2"

@@ -1,4 +1,4 @@
-// primitives/content.js — mr-heading, mr-text
+// primitives/content.js — hm-heading, hm-text
 //
 // Text content primitives.  Both support a `content` property that can
 // be a plain string or a cell reference (e.g. "cell:title").  When the
@@ -9,9 +9,9 @@ import { LitElement, html, css } from 'lit';
 import { effect } from '@preact/signals-core';
 import { getCell, resolveValue } from '../cells.js';
 
-// ── mr-heading ───────────────────────────────────────────────
+// ── hm-heading ───────────────────────────────────────────────
 
-class MrHeading extends LitElement {
+class HmHeading extends LitElement {
   static properties = {
     content: { type: String },
     level:   { type: Number },
@@ -21,8 +21,8 @@ class MrHeading extends LitElement {
     :host { display: block; }
     h1, h2, h3 {
       margin: 0;
-      color: var(--fg-primary, #e0e0e0);
-      font-family: var(--font-sans, system-ui, sans-serif);
+      color: var(--fg-primary, #333333);
+      font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif);
     }
     h1 { font-size: 1.75rem; }
     h2 { font-size: 1.35rem; }
@@ -87,11 +87,11 @@ class MrHeading extends LitElement {
   }
 }
 
-customElements.define('mr-heading', MrHeading);
+customElements.define('hm-heading', HmHeading);
 
-// ── mr-text ──────────────────────────────────────────────────
+// ── hm-text ──────────────────────────────────────────────────
 
-class MrText extends LitElement {
+class HmText extends LitElement {
   static properties = {
     content:   { type: String },
     textStyle: { type: String },
@@ -101,16 +101,16 @@ class MrText extends LitElement {
     :host { display: block; }
     .text {
       margin: 0;
-      color: var(--fg-primary, #e0e0e0);
-      font-family: var(--font-sans, system-ui, sans-serif);
+      color: var(--fg-primary, #333333);
+      font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif);
       font-size: 0.95rem;
       line-height: 1.5;
     }
     .muted {
-      color: var(--fg-muted, #888);
+      color: var(--fg-muted, #999999);
     }
     .mono {
-      font-family: var(--font-mono, 'SF Mono', 'Fira Code', monospace);
+      font-family: var(--font-mono, "SF Mono", "Fira Code", Menlo, monospace);
       font-size: 1.1rem;
     }
   `;
@@ -172,4 +172,4 @@ class MrText extends LitElement {
   }
 }
 
-customElements.define('mr-text', MrText);
+customElements.define('hm-text', HmText);

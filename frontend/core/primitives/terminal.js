@@ -1,4 +1,4 @@
-// primitives/terminal.js — mr-terminal
+// primitives/terminal.js — hm-terminal
 //
 // xterm.js wrapper as a Lit Web Component.  Dynamically imports the
 // vendored xterm bundle and FitAddon, creates a terminal instance
@@ -18,7 +18,7 @@
 
 import { LitElement, html, css } from 'lit';
 
-class MrTerminal extends LitElement {
+class HmTerminal extends LitElement {
   static properties = {
     ptyId: { type: String, attribute: 'pty-id' },
   };
@@ -30,7 +30,9 @@ class MrTerminal extends LitElement {
       height: 100%;
       position: relative;
       overflow: hidden;
-      background: #1e1e1e;
+      box-sizing: border-box;
+      background: var(--bg-terminal, #FFFFFF);
+      padding: 6px 8px;
     }
 
     #terminal-container {
@@ -66,11 +68,25 @@ class MrTerminal extends LitElement {
 
   async firstUpdated() {
     try {
-      await this._initTerminal();
+      // Set up PTY listeners FIRST so we don't miss early output
+      // (the REPL prompt arrives before xterm finishes initialising).
+      this._pendingOutput = [];
       await this._setupPtyListeners();
+
+      await this._initTerminal();
+
+      // Replay any output that arrived while xterm was loading
+      for (const data of this._pendingOutput) {
+        this._terminal.write(data);
+      }
+      this._pendingOutput = null;
+
       this._setupResizeObserver();
+
+      // Focus the terminal so the REPL is ready for input on startup
+      this._terminal.focus();
     } catch (err) {
-      console.error('[mr-terminal] Failed to initialise xterm:', err);
+      console.error('[hm-terminal] Failed to initialise xterm:', err);
     }
   }
 
@@ -91,16 +107,23 @@ class MrTerminal extends LitElement {
 
     this._terminal = new Terminal({
       cursorBlink: true,
-      fontSize: 14,
-      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-      theme: { background: '#1e1e1e', foreground: '#d4d4d4' },
+      fontSize: 13,
+      fontWeight: '300',
+      fontFamily: "'OperatorMonoSSm Nerd Font Mono', 'SF Mono', 'Fira Code', Menlo, monospace",
+      theme: {
+        background: '#FFFFFF',
+        foreground: '#333333',
+        cursor: '#007ACC',
+        cursorAccent: '#FFFFFF',
+        selectionBackground: '#ADD6FF',
+      },
     });
 
     this._terminal.loadAddon(this._fitAddon);
 
     const container = this.shadowRoot.getElementById('terminal-container');
     if (!container) {
-      console.error('[mr-terminal] Terminal container not found');
+      console.error('[hm-terminal] Terminal container not found');
       return;
     }
 
@@ -114,14 +137,14 @@ class MrTerminal extends LitElement {
         id: this.ptyId,
         data: data,
       }).catch((err) => {
-        console.error('[mr-terminal] pty_input failed:', err);
+        console.error('[hm-terminal] pty_input failed:', err);
       });
     });
 
     // Report initial size to the PTY
     this._reportResize();
 
-    console.log('[mr-terminal] xterm terminal created', this.ptyId ? `(pty: ${this.ptyId})` : '');
+    console.log('[hm-terminal] xterm terminal created', this.ptyId ? `(pty: ${this.ptyId})` : '');
   }
 
   /**
@@ -129,15 +152,18 @@ class MrTerminal extends LitElement {
    */
   async _setupPtyListeners() {
     if (!window.__TAURI__?.event?.listen) {
-      console.warn('[mr-terminal] Tauri event API not available');
+      console.warn('[hm-terminal] Tauri event API not available');
       return;
     }
 
     // pty:output — write PTY output to terminal (filtered by pty-id)
     this._unlistenOutput = await window.__TAURI__.event.listen('pty:output', (event) => {
       const { id, data } = event.payload;
-      if (id === this.ptyId && this._terminal) {
+      if (id !== this.ptyId) return;
+      if (this._terminal) {
         this._terminal.write(data);
+      } else if (this._pendingOutput) {
+        this._pendingOutput.push(data);
       }
     });
 
@@ -159,11 +185,17 @@ class MrTerminal extends LitElement {
     const container = this.shadowRoot.getElementById('terminal-container');
     if (!container) return;
 
+    let resizeTimer = null;
     this._resizeObserver = new ResizeObserver(() => {
-      if (this._fitAddon) {
-        this._fitAddon.fit();
-        this._reportResize();
-      }
+      // Debounce to prevent infinite resize loops when layout is settling
+      if (resizeTimer) return;
+      resizeTimer = setTimeout(() => {
+        resizeTimer = null;
+        if (this._fitAddon) {
+          this._fitAddon.fit();
+          this._reportResize();
+        }
+      }, 50);
     });
 
     this._resizeObserver.observe(container);
@@ -180,7 +212,7 @@ class MrTerminal extends LitElement {
       cols: this._terminal.cols,
       rows: this._terminal.rows,
     }).catch((err) => {
-      console.error('[mr-terminal] pty_resize failed:', err);
+      console.error('[hm-terminal] pty_resize failed:', err);
     });
   }
 
@@ -214,8 +246,8 @@ class MrTerminal extends LitElement {
     }
     this._fitAddon = null;
 
-    console.log('[mr-terminal] Terminal disposed');
+    console.log('[hm-terminal] Terminal disposed');
   }
 }
 
-customElements.define('mr-terminal', MrTerminal);
+customElements.define('hm-terminal', HmTerminal);
