@@ -65,9 +65,11 @@
 (define (new-file)
   (cell-set! 'current-file "untitled.rkt")
   (cell-set! 'file-dirty #f)
+  (cell-set! 'title "MrRacket - untitled.rkt")
+  (cell-set! 'status "New file")
   (send-message! (make-message "editor:open"
-                               'content ""
-                               'filename "untitled.rkt"
+                               'path "untitled.rkt"
+                               'content "#lang racket\n\n"
                                'language "racket")))
 
 ;; ── Event handlers ───────────────────────────────────────────
@@ -107,8 +109,8 @@
      (cell-set! 'title (format "MrRacket - ~a" filename))
      (cell-set! 'status (format "Opened ~a" filename))
      (send-message! (make-message "editor:open"
+                                  'path path
                                   'content content
-                                  'filename filename
                                   'language (detect-language path)))]
 
     ["file:write:result"
@@ -120,14 +122,20 @@
      (cell-set! 'title (format "MrRacket - ~a" filename))
      (cell-set! 'status (format "Saved ~a" filename))]
 
-    ["file:error"
-     ;; File operation failed
-     (define error-msg (message-ref msg 'message "Unknown error"))
+    ["file:read:error"
+     (define error-msg (message-ref msg 'error "Unknown error"))
      (cell-set! 'status (format "Error: ~a" error-msg))
-     (eprintf "editor: file error: ~a\n" error-msg)]
+     (eprintf "editor: file read error: ~a\n" error-msg)]
 
-    ["file:cancel"
-     ;; User cancelled the dialog
+    ["file:write:error"
+     (define error-msg (message-ref msg 'error "Unknown error"))
+     (cell-set! 'status (format "Error: ~a" error-msg))
+     (eprintf "editor: file write error: ~a\n" error-msg)]
+
+    ["file:open-dialog:cancelled"
+     (cell-set! 'status "Cancelled")]
+
+    ["file:save-dialog:cancelled"
      (cell-set! 'status "Cancelled")]
 
     [_

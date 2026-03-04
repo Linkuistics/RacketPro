@@ -14,8 +14,11 @@
 ;; Rust will spawn the process and connect it to the frontend terminal.
 (define (start-repl)
   (send-message! (make-message "pty:create"
+                               'id "repl"
                                'command "racket"
-                               'args (list)))
+                               'args (list)
+                               'cols 80
+                               'rows 24))
   (cell-set! 'status "REPL started"))
 
 ;; Send a `,enter "<path>"` command to the REPL PTY so that
@@ -23,6 +26,7 @@
 (define (run-file path)
   (define cmd (format ",enter \"~a\"\n" path))
   (send-message! (make-message "pty:write"
+                               'id "repl"
                                'data cmd))
   (cell-set! 'status (format "Running ~a" path)))
 
