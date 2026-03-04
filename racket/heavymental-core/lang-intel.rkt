@@ -9,6 +9,7 @@
 
 (provide analyze-source
          push-intel-to-frontend!
+         offset->position
          handle-document-opened
          handle-document-changed
          handle-document-closed
@@ -164,7 +165,7 @@
   (define safe-offset (min offset (string-length text)))
   (define prefix (substring text 0 safe-offset))
   (define lines (string-split prefix "\n" #:trim? #f))
-  (define line-count (length lines))
+  (define line-count (max 1 (length lines)))
   (define last-line (if (null? lines) "" (last lines)))
   (hasheq 'line line-count
           'col (string-length last-line)))

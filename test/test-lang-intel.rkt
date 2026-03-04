@@ -53,3 +53,29 @@
                                  "#lang racket\n(define x 42)\nx\n"))
   (check-true (hash-has-key? result 'colors))
   (check-true (list? (hash-ref result 'colors))))
+
+;; ── Offset conversion tests ──────────────────────────────
+
+(test-case "offset->position handles first line"
+  ;; Use the exported offset->position
+  (define pos (offset->position "#lang racket\n" 0))
+  (check-equal? (hash-ref pos 'line) 1)
+  (check-equal? (hash-ref pos 'col) 0))
+
+(test-case "offset->position handles second line"
+  (define text "#lang racket\n(define x 42)\n")
+  (define pos (offset->position text 14))  ;; first char of line 2
+  (check-equal? (hash-ref pos 'line) 2)
+  (check-equal? (hash-ref pos 'col) 1))
+
+;; ── Edge cases ────────────────────────────────────────────
+
+(test-case "analyze-source handles empty string"
+  (define result (analyze-source "/tmp/empty.rkt" ""))
+  (check-true (hash? result)))
+
+(test-case "analyze-source handles non-Racket content gracefully"
+  ;; An unmatched close-paren triggers a read error
+  (define result (analyze-source "/tmp/bad.rkt" ")"))
+  (define diags (hash-ref result 'diagnostics))
+  (check-true (> (length diags) 0)))
