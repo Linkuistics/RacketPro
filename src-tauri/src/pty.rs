@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter};
 
 pub struct PtyInstance {
     writer: Box<dyn Write + Send>,
-    _master: Box<dyn MasterPty + Send>,
+    master: Box<dyn MasterPty + Send>,
 }
 
 #[derive(Clone)]
@@ -46,7 +46,7 @@ impl PtyManager {
             cmd.arg(arg);
         }
 
-        let _child = pair
+        let child = pair
             .slave
             .spawn_command(cmd)
             .map_err(|e| format!("Failed to spawn command: {}", e))?;
@@ -69,7 +69,7 @@ impl PtyManager {
                 id.to_string(),
                 PtyInstance {
                     writer,
-                    _master: pair.master,
+                    master: pair.master,
                 },
             );
         }
@@ -77,13 +77,19 @@ impl PtyManager {
         let pty_id = id.to_string();
         let instances_ref = self.instances.clone();
         std::thread::spawn(move || {
+            let mut child = child;
             let mut buf_reader = std::io::BufReader::new(reader);
             let mut buf = [0u8; 4096];
             loop {
                 match std::io::Read::read(&mut buf_reader, &mut buf) {
                     Ok(0) => {
+                        // Reap the child process to prevent zombies
+                        let code = child
+                            .wait()
+                            .map(|s| s.exit_code() as i64)
+                            .unwrap_or(0);
                         let _ =
-                            app_handle.emit("pty:exit", json!({ "id": pty_id, "code": 0 }));
+                            app_handle.emit("pty:exit", json!({ "id": pty_id, "code": code }));
                         break;
                     }
                     Ok(n) => {
@@ -93,14 +99,16 @@ impl PtyManager {
                     }
                     Err(e) => {
                         log::error!("PTY read error for {}: {}", pty_id, e);
+                        let _ = child.wait();
                         let _ =
                             app_handle.emit("pty:exit", json!({ "id": pty_id, "code": -1 }));
                         break;
                     }
                 }
             }
-            let mut instances = instances_ref.lock().unwrap();
-            instances.remove(&pty_id);
+            if let Ok(mut instances) = instances_ref.lock() {
+                instances.remove(&pty_id);
+            }
         });
 
         Ok(())
@@ -128,7 +136,7 @@ impl PtyManager {
             .get(id)
             .ok_or_else(|| format!("PTY not found: {}", id))?;
         instance
-            ._master
+            .master
             .resize(PtySize {
                 rows,
                 cols,

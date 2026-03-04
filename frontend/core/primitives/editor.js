@@ -189,6 +189,20 @@ class MrEditor extends LitElement {
         }
       })
     );
+
+    // editor:request-save — Racket asks frontend to trigger a save
+    // (e.g., when the user clicks File > Save in the menu bar)
+    this._unsubs.push(
+      onMessage('editor:request-save', () => {
+        if (this._editor) {
+          const content = this._editor.getValue();
+          dispatch('editor:save-request', {
+            path: this.filePath,
+            content,
+          });
+        }
+      })
+    );
   }
 
   disconnectedCallback() {

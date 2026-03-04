@@ -67,7 +67,7 @@ class MrTerminal extends LitElement {
   async firstUpdated() {
     try {
       await this._initTerminal();
-      this._setupPtyListeners();
+      await this._setupPtyListeners();
       this._setupResizeObserver();
     } catch (err) {
       console.error('[mr-terminal] Failed to initialise xterm:', err);

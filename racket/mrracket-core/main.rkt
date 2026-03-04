@@ -85,7 +85,9 @@
     [(string=? action "quit") (exit 0)]
     [(string=? action "new-file") (new-file)]
     [(string=? action "open-file") (open-file)]
-    [(string=? action "save-file") (void)] ;; save handled via frontend Cmd+S
+    [(string=? action "save-file")
+     ;; Ask frontend to trigger a save (Monaco owns the buffer content)
+     (send-message! (make-message "editor:request-save"))]
     [(string=? action "run") (handle-run)]
     [else
      (eprintf "Unhandled menu action: ~a\n" action)]))

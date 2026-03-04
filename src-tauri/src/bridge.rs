@@ -230,6 +230,15 @@ fn handle_intercepted_message(
             }
             true
         }
+        "pty:resize" => {
+            let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let cols = msg.get("cols").and_then(|v| v.as_u64()).unwrap_or(80) as u16;
+            let rows = msg.get("rows").and_then(|v| v.as_u64()).unwrap_or(24) as u16;
+            if let Err(e) = pty.resize(id, cols, rows) {
+                log::error!("pty:resize failed: {e}");
+            }
+            true
+        }
         "pty:kill" => {
             let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
             if let Err(e) = pty.kill(id) {
