@@ -25,6 +25,11 @@ import {
   racketLanguageConfig,
   racketTokenProvider,
 } from '../racket-language.js';
+import {
+  rhombusLanguageId,
+  rhombusLanguageConfig,
+  rhombusTokenProvider,
+} from '../rhombus-language.js';
 
 /** Whether the Racket language has been registered with Monaco. */
 let racketRegistered = false;
@@ -42,6 +47,24 @@ function registerRacketLanguage(monaco) {
   monaco.languages.setMonarchTokensProvider(racketLanguageId, racketTokenProvider);
   racketRegistered = true;
   console.log('[hm-editor] Racket language registered');
+}
+
+/** Whether the Rhombus language has been registered with Monaco. */
+let rhombusRegistered = false;
+
+/**
+ * Register the Rhombus language with Monaco's language registry.
+ * Safe to call multiple times — only registers once.
+ *
+ * @param {typeof import('monaco-editor').monaco} monaco
+ */
+function registerRhombusLanguage(monaco) {
+  if (rhombusRegistered) return;
+  monaco.languages.register({ id: rhombusLanguageId });
+  monaco.languages.setLanguageConfiguration(rhombusLanguageId, rhombusLanguageConfig);
+  monaco.languages.setMonarchTokensProvider(rhombusLanguageId, rhombusTokenProvider);
+  rhombusRegistered = true;
+  console.log('[hm-editor] Rhombus language registered');
 }
 
 class HmEditor extends LitElement {
@@ -132,6 +155,9 @@ class HmEditor extends LitElement {
 
     // Register Racket language (idempotent)
     registerRacketLanguage(monaco);
+
+    // Register Rhombus language (idempotent)
+    registerRhombusLanguage(monaco);
 
     const container = this.shadowRoot.getElementById('editor-container');
     if (!container) {
