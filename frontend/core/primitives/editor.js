@@ -19,6 +19,7 @@ import { effect } from '@preact/signals-core';
 import { getCell } from '../cells.js';
 import { onMessage, dispatch } from '../bridge.js';
 import { initLangIntel } from '../lang-intel.js';
+import { ArrowOverlay } from '../arrows.js';
 import {
   racketLanguageId,
   racketLanguageConfig,
@@ -93,6 +94,7 @@ class HmEditor extends LitElement {
     /** @type {import('monaco-editor').monaco.IDisposable|null} */
     this._saveDisposable = null;
     this._disposeVisibility = null;
+    this._arrowOverlay = null;
   }
 
   render() {
@@ -200,6 +202,9 @@ class HmEditor extends LitElement {
     // Initialize language intelligence with Monaco and editor references
     initLangIntel(monaco, this._editor);
 
+    // Mount Check Syntax arrow overlay
+    this._arrowOverlay = new ArrowOverlay(this._editor, monaco, this.shadowRoot);
+
     // Expose filePath on editor for lang-intel to read
     this._editor.filePath = this.filePath;
 
@@ -275,6 +280,11 @@ class HmEditor extends LitElement {
     if (this._disposeVisibility) {
       this._disposeVisibility();
       this._disposeVisibility = null;
+    }
+
+    if (this._arrowOverlay) {
+      this._arrowOverlay.dispose();
+      this._arrowOverlay = null;
     }
 
     // Clear debounce timer for document:changed
