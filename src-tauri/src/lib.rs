@@ -56,6 +56,22 @@ pub fn run() {
 
             Ok(())
         })
+        .on_menu_event(|app, event| {
+            // Forward menu item clicks to Racket as menu:action events.
+            let action = event.id().0.clone();
+            log::info!("Menu event: {action}");
+
+            let state = app.state::<AppState>();
+            if let Some(bridge) = state.bridge.as_ref() {
+                let msg = serde_json::json!({
+                    "type": "menu:action",
+                    "action": action,
+                });
+                if let Err(e) = bridge.send(msg) {
+                    log::error!("Failed to send menu action to Racket: {e}");
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![send_to_racket])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

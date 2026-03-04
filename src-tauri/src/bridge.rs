@@ -3,6 +3,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::{mpsc, Mutex};
 use std::thread;
+use tauri::menu::{MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{AppHandle, Emitter};
 
 /// Manages a child Racket process, routing JSON-RPC messages between the
@@ -13,6 +14,154 @@ pub struct RacketBridge {
     /// Handle to the child Racket process, wrapped in a Mutex so `stop()` can
     /// take ownership via `Option::take`.
     child: Mutex<Option<Child>>,
+}
+
+/// Convert a Racket-style shortcut string (e.g. "Cmd+Shift+Z") to a Tauri
+/// accelerator string (e.g. "CmdOrCtrl+Shift+Z").
+fn convert_shortcut(shortcut: &str) -> String {
+    shortcut
+        .split('+')
+        .map(|part| match part.trim() {
+            "Cmd" | "Command" => "CmdOrCtrl",
+            other => other,
+        })
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
+/// Build a native menu from the JSON structure sent by Racket and set it on
+/// the application.
+fn handle_menu_set(app: &AppHandle, menu_data: &Value) {
+    let items = match menu_data.as_array() {
+        Some(arr) => arr,
+        None => {
+            log::error!("menu:set 'menu' field is not an array");
+            return;
+        }
+    };
+
+    let menu = match MenuBuilder::new(app).build() {
+        Ok(m) => m,
+        Err(e) => {
+            log::error!("Failed to create menu: {e}");
+            return;
+        }
+    };
+
+    for submenu_def in items {
+        let label = submenu_def
+            .get("label")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+
+        let children = match submenu_def.get("children").and_then(|v| v.as_array()) {
+            Some(c) => c,
+            None => continue,
+        };
+
+        let mut submenu = SubmenuBuilder::new(app, label);
+
+        for child in children {
+            let child_label = child
+                .get("label")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+
+            // Separator
+            if child_label == "---" {
+                submenu = submenu.separator();
+                continue;
+            }
+
+            let action = child.get("action").and_then(|v| v.as_str());
+            let shortcut = child.get("shortcut").and_then(|v| v.as_str());
+
+            // Check for well-known predefined items
+            match action {
+                Some("quit") => {
+                    match PredefinedMenuItem::quit(app, Some(child_label)) {
+                        Ok(item) => {
+                            submenu = submenu.item(&item);
+                        }
+                        Err(e) => log::error!("Failed to create Quit item: {e}"),
+                    }
+                    continue;
+                }
+                Some("copy") => {
+                    match PredefinedMenuItem::copy(app, Some(child_label)) {
+                        Ok(item) => {
+                            submenu = submenu.item(&item);
+                        }
+                        Err(e) => log::error!("Failed to create Copy item: {e}"),
+                    }
+                    continue;
+                }
+                Some("cut") => {
+                    match PredefinedMenuItem::cut(app, Some(child_label)) {
+                        Ok(item) => {
+                            submenu = submenu.item(&item);
+                        }
+                        Err(e) => log::error!("Failed to create Cut item: {e}"),
+                    }
+                    continue;
+                }
+                Some("paste") => {
+                    match PredefinedMenuItem::paste(app, Some(child_label)) {
+                        Ok(item) => {
+                            submenu = submenu.item(&item);
+                        }
+                        Err(e) => log::error!("Failed to create Paste item: {e}"),
+                    }
+                    continue;
+                }
+                Some("select-all") => {
+                    match PredefinedMenuItem::select_all(app, Some(child_label)) {
+                        Ok(item) => {
+                            submenu = submenu.item(&item);
+                        }
+                        Err(e) => log::error!("Failed to create SelectAll item: {e}"),
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+
+            // Regular menu item with optional shortcut
+            let action_id = action.unwrap_or(child_label);
+            let item_result = if let Some(sc) = shortcut {
+                let accel = convert_shortcut(sc);
+                MenuItem::with_id(app, action_id, child_label, true, Some(accel.as_str()))
+            } else {
+                MenuItem::with_id(app, action_id, child_label, true, None::<&str>)
+            };
+
+            match item_result {
+                Ok(item) => {
+                    submenu = submenu.item(&item);
+                }
+                Err(e) => {
+                    log::error!("Failed to create menu item '{child_label}': {e}");
+                }
+            }
+        }
+
+        match submenu.build() {
+            Ok(built) => {
+                if let Err(e) = menu.append(&built) {
+                    log::error!("Failed to append submenu '{label}': {e}");
+                }
+            }
+            Err(e) => {
+                log::error!("Failed to build submenu '{label}': {e}");
+            }
+        }
+    }
+
+    if let Err(e) = app.set_menu(menu) {
+        log::error!("Failed to set menu on app: {e}");
+    } else {
+        log::info!("Native menu set successfully from Racket menu:set message");
+    }
 }
 
 impl RacketBridge {
@@ -48,13 +197,41 @@ impl RacketBridge {
                                     .get("type")
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("unknown");
+
+                                // Intercept menu:set to build native menus
+                                if msg_type == "menu:set" {
+                                    if let Some(menu_data) = msg.get("menu") {
+                                        let app = reader_handle.clone();
+                                        let menu_data = menu_data.clone();
+                                        // Menu operations must run on the main
+                                        // thread, so dispatch via
+                                        // run_on_main_thread.
+                                        let _ = reader_handle.run_on_main_thread(
+                                            move || {
+                                                handle_menu_set(&app, &menu_data);
+                                            },
+                                        );
+                                    } else {
+                                        log::warn!(
+                                            "menu:set message missing 'menu' field"
+                                        );
+                                    }
+                                    continue;
+                                }
+
                                 let event_name = format!("racket:{msg_type}");
-                                if let Err(e) = reader_handle.emit(&event_name, &msg) {
-                                    log::error!("Failed to emit Tauri event {event_name}: {e}");
+                                if let Err(e) =
+                                    reader_handle.emit(&event_name, &msg)
+                                {
+                                    log::error!(
+                                        "Failed to emit Tauri event {event_name}: {e}"
+                                    );
                                 }
                             }
                             Err(e) => {
-                                log::warn!("Non-JSON line from Racket: {e} — raw: {text}");
+                                log::warn!(
+                                    "Non-JSON line from Racket: {e} — raw: {text}"
+                                );
                             }
                         }
                     }
