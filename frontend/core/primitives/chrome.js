@@ -103,6 +103,11 @@ class HmBreadcrumb extends LitElement {
       color: #CC0000;
     }
 
+    .action-btn.step:hover {
+      background: rgba(156, 39, 176, 0.1);
+      color: #9C27B0;
+    }
+
     :host([hidden]) {
       display: none;
     }
@@ -131,7 +136,8 @@ class HmBreadcrumb extends LitElement {
     const cellNames = [];
     if (this.file?.startsWith('cell:')) cellNames.push(this.file.slice(5));
     if (this.root?.startsWith('cell:')) cellNames.push(this.root.slice(5));
-    cellNames.push('repl-running');  // Always watch this cell
+    cellNames.push('repl-running');
+    cellNames.push('stepper-active');
 
     for (const name of cellNames) getCell(name);
     this._disposeEffect = effect(() => {
@@ -163,6 +169,7 @@ class HmBreadcrumb extends LitElement {
     const segments = relPath ? relPath.split(/[/\\]/).filter(Boolean) : [];
 
     const isRunning = resolveValue('cell:repl-running') || false;
+    const isStepping = resolveValue('cell:stepper-active') || false;
 
     return html`
       <div class="path">
@@ -179,6 +186,14 @@ class HmBreadcrumb extends LitElement {
               <svg width="14" height="14" viewBox="0 0 16 16"><path d="M4 2l10 6-10 6z" fill="currentColor"/></svg>
             </span>`
         }
+        ${!isStepping && !isRunning
+          ? html`<span class="action-btn step" title="Step Through (Cmd+Shift+R)" @click=${() => dispatch('stepper:start', { path: filePath })}>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <path d="M4 2l6 4-6 4z" fill="currentColor" opacity="0.6"/>
+                <line x1="12" y1="2" x2="12" y2="14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+            </span>`
+          : ''}
       </div>
     `;
   }
