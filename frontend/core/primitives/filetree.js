@@ -11,7 +11,7 @@
 import { LitElement, html, css, nothing, svg } from 'lit';
 import { effect } from '@preact/signals-core';
 import { getCell } from '../cells.js';
-import { dispatch } from '../bridge.js';
+import { dispatch, onMessage } from '../bridge.js';
 
 // ── Chevron icons for folders ───────────────────────────────
 
@@ -271,6 +271,7 @@ class HmFiletree extends LitElement {
     this._activeFile = null;
     this._disposeEffect = null;
     this._disposeActiveSync = null;
+    this._unsubWriteResult = null;
     this._resolvedRoot = '';
     this._rootExpanded = true;
   }
@@ -288,6 +289,10 @@ class HmFiletree extends LitElement {
     if (this._disposeActiveSync) {
       this._disposeActiveSync();
       this._disposeActiveSync = null;
+    }
+    if (this._unsubWriteResult) {
+      this._unsubWriteResult();
+      this._unsubWriteResult = null;
     }
   }
 
@@ -324,6 +329,20 @@ class HmFiletree extends LitElement {
           if (active) active.scrollIntoView({ block: 'nearest' });
         });
       }
+    });
+
+    // Invalidate cache when a file is written (e.g. save-as creates a new file)
+    this._unsubWriteResult = onMessage('file:write:result', (msg) => {
+      const filePath = msg.path;
+      if (!filePath) return;
+      const lastSlash = filePath.lastIndexOf('/');
+      if (lastSlash < 0) return;
+      const parentDir = filePath.substring(0, lastSlash);
+      this._cache.delete(parentDir);
+      if (this._expanded.has(parentDir) || parentDir === this._resolvedRoot) {
+        this._loadDir(parentDir);
+      }
+      this.requestUpdate();
     });
   }
 
