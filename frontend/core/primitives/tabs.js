@@ -121,6 +121,8 @@ class HmTabs extends LitElement {
     this._activePath = "";
     this._unsubs = [];
     this._disposeEffect = null;
+    this._disposeDirty = null;
+    this._dirtyPaths = new Set();
   }
 
   firstUpdated() {
@@ -146,6 +148,13 @@ class HmTabs extends LitElement {
           this.requestUpdate();
         }
       });
+
+      // Watch dirty-files cell for dirty indicators
+      const dirtyCell = getCell("dirty-files");
+      this._disposeDirty = effect(() => {
+        this._dirtyPaths = new Set(dirtyCell.value || []);
+        this.requestUpdate();
+      });
     }, 0);
   }
 
@@ -160,6 +169,10 @@ class HmTabs extends LitElement {
     if (this._disposeEffect) {
       this._disposeEffect();
       this._disposeEffect = null;
+    }
+    if (this._disposeDirty) {
+      this._disposeDirty();
+      this._disposeDirty = null;
     }
   }
 
@@ -189,12 +202,14 @@ class HmTabs extends LitElement {
     return html`
       <div class="tabs-area">
         ${this._tabs.map(
-          (tab) => html`
+          (tab) => {
+            const isDirty = this._dirtyPaths.has(tab.path);
+            return html`
             <div
               class="tab ${tab.path === this._activePath ? "active" : ""}"
               @click=${() => this._selectTab(tab.path)}
             >
-              <span class="tab-label">${tab.name}</span>
+              <span class="tab-label">${isDirty ? '• ' : ''}${tab.name}</span>
               <span
                 class="tab-close"
                 @click=${(e) => this._closeTab(e, tab.path)}
@@ -209,7 +224,8 @@ class HmTabs extends LitElement {
                 </svg>
               </span>
             </div>
-          `,
+          `;
+          },
         )}
       </div>
     `;
