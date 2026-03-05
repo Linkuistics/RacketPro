@@ -207,8 +207,13 @@
 ;; ── Run handler ────────────────────────────────────────────
 (define (handle-run)
   (define path (current-file-path))
-  (when (and path (not (string=? path "untitled.rkt")))
-    (run-file path)))
+  (cond
+    [(or (not path) (string=? path "") (string=? path "untitled.rkt")) (void)]
+    [(file-dirty? path)
+     (set-pending-run!)
+     (send-message! (make-message "editor:request-save"))]
+    [else
+     (run-file path)]))
 
 ;; ── Message dispatcher ─────────────────────────────────────
 (define (dispatch msg)
@@ -223,7 +228,16 @@
          (string=? typ "file:write:error")
          (string=? typ "file:open-dialog:cancelled")
          (string=? typ "file:save-dialog:cancelled"))
-     (handle-file-result msg)]
+     (handle-file-result msg)
+     ;; After a successful write, check for deferred actions
+     (when (string=? typ "file:write:result")
+       (define path (message-ref msg 'path ""))
+       (when (pending-run?)
+         (clear-pending-run!)
+         (run-file path))
+       (when (pending-close? path)
+         (clear-pending-close! path)
+         (send-message! (make-message "tab:close" 'path path))))]
     ;; Dialog results (e.g., save-before-close confirmation)
     [(string=? typ "dialog:confirm:result")
      (handle-dialog-result msg)]

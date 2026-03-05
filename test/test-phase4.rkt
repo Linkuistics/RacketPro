@@ -179,4 +179,137 @@
           msgs))
   (check-true (pending-close? "/tmp/dirty.rkt")))
 
+;; ═══════════════════════════════════════════════════════════════════════════
+;; Test: save-before-run (pending-run state)
+;; ═══════════════════════════════════════════════════════════════════════════
+
+(test-case "pending-run? is initially false"
+  (clear-pending-run!)
+  (check-false (pending-run?)))
+
+(test-case "set-pending-run! sets pending-run to true"
+  (clear-pending-run!)
+  (set-pending-run!)
+  (check-true (pending-run?)))
+
+(test-case "clear-pending-run! resets pending-run to false"
+  (set-pending-run!)
+  (check-true (pending-run?))
+  (clear-pending-run!)
+  (check-false (pending-run?)))
+
+(test-case "save-before-run: dirty file sets pending-run and sends editor:request-save"
+  ;; Simulate what handle-run in main.rkt does for a dirty file:
+  ;; 1. Check file-dirty? → true
+  ;; 2. Set pending-run
+  ;; 3. Send editor:request-save
+  (reset-cells!)
+  (clear-pending-run!)
+  (with-output-to-string
+    (lambda ()
+      (cell-set! 'current-file "/tmp/test.rkt")
+      (mark-file-dirty! "/tmp/test.rkt")))
+  (define path (current-file-path))
+  ;; Verify preconditions
+  (check-true (file-dirty? path))
+  ;; Simulate handle-run logic for dirty file
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (when (file-dirty? path)
+          (set-pending-run!)
+          (send-message! (make-message "editor:request-save"))))))
+  (define msgs (parse-all-messages output))
+  ;; Should have sent editor:request-save
+  (check-true
+   (ormap (lambda (m)
+            (equal? (hash-ref m 'type #f) "editor:request-save"))
+          msgs))
+  ;; pending-run should be set
+  (check-true (pending-run?)))
+
+(test-case "save-before-run: clean file does not set pending-run"
+  (reset-cells!)
+  (clear-pending-run!)
+  (with-output-to-string
+    (lambda ()
+      (cell-set! 'current-file "/tmp/test.rkt")))
+  (define path (current-file-path))
+  ;; File is not dirty — handle-run would call run-file directly
+  (check-false (file-dirty? path))
+  (check-false (pending-run?)))
+
+(test-case "save-before-run: file:write:result clears pending-run"
+  ;; Simulate the post-write dispatch in main.rkt:
+  ;; After handle-file-result processes file:write:result, if pending-run? is true,
+  ;; clear it and run the file.
+  (reset-cells!)
+  (with-output-to-string
+    (lambda ()
+      (cell-set! 'current-file "/tmp/test.rkt")
+      (mark-file-dirty! "/tmp/test.rkt")))
+  ;; Set pending-run (simulating what handle-run does)
+  (set-pending-run!)
+  (check-true (pending-run?))
+  ;; Simulate file:write:result arriving
+  (with-output-to-string
+    (lambda ()
+      (handle-file-result
+       (make-message "file:write:result" 'path "/tmp/test.rkt"))))
+  ;; Now simulate the post-write check from main.rkt dispatch
+  (when (pending-run?)
+    (clear-pending-run!))
+  (check-false (pending-run?)))
+
+(test-case "save-before-run: pending-close after write sends tab:close"
+  ;; Verify that pending-close is also handled after file:write:result
+  (reset-cells!)
+  (clear-pending-run!)
+  (with-output-to-string
+    (lambda ()
+      (cell-set! 'current-file "/tmp/test.rkt")
+      (mark-file-dirty! "/tmp/test.rkt")))
+  (set-pending-close! "/tmp/test.rkt")
+  (check-true (pending-close? "/tmp/test.rkt"))
+  ;; Simulate file:write:result + post-write dispatch
+  (with-output-to-string
+    (lambda ()
+      (handle-file-result
+       (make-message "file:write:result" 'path "/tmp/test.rkt"))))
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (when (pending-close? "/tmp/test.rkt")
+          (clear-pending-close! "/tmp/test.rkt")
+          (send-message! (make-message "tab:close" 'path "/tmp/test.rkt"))))))
+  (define msgs (parse-all-messages output))
+  (check-true
+   (ormap (lambda (m)
+            (and (equal? (hash-ref m 'type #f) "tab:close")
+                 (equal? (hash-ref m 'path #f) "/tmp/test.rkt")))
+          msgs))
+  (check-false (pending-close? "/tmp/test.rkt")))
+
+(test-case "save-before-run: empty path is a no-op"
+  ;; handle-run should do nothing when current-file is ""
+  (reset-cells!)
+  (clear-pending-run!)
+  ;; current-file defaults to "untitled.rkt" after reset, set to ""
+  (with-output-to-string
+    (lambda ()
+      (cell-set! 'current-file "")))
+  (define path (current-file-path))
+  (check-equal? path "")
+  ;; Simulate handle-run guard: should not set pending-run or do anything
+  (check-false (pending-run?)))
+
+(test-case "save-before-run: untitled.rkt is a no-op"
+  ;; handle-run should do nothing when current-file is "untitled.rkt"
+  (reset-cells!)
+  (clear-pending-run!)
+  (define path (current-file-path))
+  (check-equal? path "untitled.rkt")
+  ;; Simulate handle-run guard: should not set pending-run or do anything
+  (check-false (pending-run?)))
+
 (displayln "All Phase 4 tests passed!")

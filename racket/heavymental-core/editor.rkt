@@ -26,7 +26,10 @@
          reset-dirty-state!
          set-pending-close!
          pending-close?
-         clear-pending-close!)
+         clear-pending-close!
+         pending-run?
+         set-pending-run!
+         clear-pending-run!)
 
 ;; ── Accessors for cell state ─────────────────────────────────
 ;; These read from cells defined in main.rkt via cell-ref.
@@ -113,6 +116,15 @@
 (define (set-pending-close! path) (set-add! _pending-close-paths path))
 (define (pending-close? path) (set-member? _pending-close-paths path))
 (define (clear-pending-close! path) (set-remove! _pending-close-paths path))
+
+;; ── Pending run state ─────────────────────────────────────────────
+;; When the user hits Run on a dirty file, we save first and set
+;; pending-run so that the file:write:result handler can trigger the run.
+(define _pending-run #f)
+
+(define (pending-run?) _pending-run)
+(define (set-pending-run!) (set! _pending-run #t))
+(define (clear-pending-run!) (set! _pending-run #f))
 
 ;; ── Tab close with dirty check ─────────────────────────────────
 
