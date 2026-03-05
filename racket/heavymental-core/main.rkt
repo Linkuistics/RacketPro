@@ -138,6 +138,11 @@
      (define path (message-ref msg 'path ""))
      (when (not (string=? path ""))
        (send-message! (make-message "file:read" 'path path)))]
+    ;; Tab bar: user requests to close a tab (may show dirty dialog)
+    [(string=? event-name "tab:close-request")
+     (define path (message-ref msg 'path ""))
+     (when (not (string=? path ""))
+       (handle-tab-close-request path))]
     ;; Tab bar: user clicked a tab
     [(string=? event-name "tab:select")
      (define path (message-ref msg 'path ""))
@@ -219,6 +224,9 @@
          (string=? typ "file:open-dialog:cancelled")
          (string=? typ "file:save-dialog:cancelled"))
      (handle-file-result msg)]
+    ;; Dialog results (e.g., save-before-close confirmation)
+    [(string=? typ "dialog:confirm:result")
+     (handle-dialog-result msg)]
     ;; PTY events
     [(string=? typ "pty:exit")
      (handle-repl-event msg)]

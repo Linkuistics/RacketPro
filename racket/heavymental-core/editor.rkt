@@ -9,6 +9,8 @@
 
 (provide handle-editor-event
          handle-file-result
+         handle-tab-close-request
+         handle-dialog-result
          open-file
          save-current-file
          new-file
@@ -21,7 +23,10 @@
          mark-file-clean!
          file-dirty?
          any-dirty-files?
-         reset-dirty-state!)
+         reset-dirty-state!
+         set-pending-close!
+         pending-close?
+         clear-pending-close!)
 
 ;; ── Accessors for cell state ─────────────────────────────────
 ;; These read from cells defined in main.rkt via cell-ref.
@@ -101,6 +106,45 @@
 
 (define (sync-dirty-cell!)
   (cell-set! 'dirty-files (set->list dirty-set)))
+
+;; ── Pending actions ─────────────────────────────────────────────
+(define _pending-close-paths (mutable-set))
+
+(define (set-pending-close! path) (set-add! _pending-close-paths path))
+(define (pending-close? path) (set-member? _pending-close-paths path))
+(define (clear-pending-close! path) (set-remove! _pending-close-paths path))
+
+;; ── Tab close with dirty check ─────────────────────────────────
+
+(define (handle-tab-close-request path)
+  (cond
+    [(file-dirty? path)
+     (define filename (path->filename path))
+     (send-message! (make-message "dialog:confirm"
+                                  'id (format "close:~a" path)
+                                  'title "Save Changes"
+                                  'message (format "Do you want to save changes to ~a?" filename)
+                                  'save_label "Save"
+                                  'dont_save_label "Don't Save"
+                                  'path path))]
+    [else
+     (send-message! (make-message "tab:close" 'path path))]))
+
+(define (handle-dialog-result msg)
+  (define id (message-ref msg 'id ""))
+  (define choice (message-ref msg 'choice "cancel"))
+  (cond
+    [(string-prefix? id "close:")
+     (define path (substring id 6))
+     (cond
+       [(string=? choice "save")
+        (send-message! (make-message "editor:request-save"))
+        (set-pending-close! path)]
+       [(string=? choice "dont-save")
+        (mark-file-clean! path)
+        (send-message! (make-message "tab:close" 'path path))]
+       [else (void)])]  ;; cancel — do nothing
+    [else (void)]))
 
 ;; ── File operations ──────────────────────────────────────────
 

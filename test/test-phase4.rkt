@@ -103,4 +103,80 @@
        (make-message "file:write:result" 'path "/tmp/test.rkt"))))
   (check-false (file-dirty? "/tmp/test.rkt")))
 
+;; ═══════════════════════════════════════════════════════════════════════════
+;; Test: tab close request handling
+;; ═══════════════════════════════════════════════════════════════════════════
+
+(test-case "tab:close-request for clean file sends tab:close immediately"
+  (reset-cells!)
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (handle-tab-close-request "/tmp/clean.rkt"))))
+  (define msgs (parse-all-messages output))
+  (check-true
+   (ormap (lambda (m)
+            (and (equal? (hash-ref m 'type #f) "tab:close")
+                 (equal? (hash-ref m 'path #f) "/tmp/clean.rkt")))
+          msgs)))
+
+(test-case "tab:close-request for dirty file sends dialog:confirm"
+  (reset-cells!)
+  (with-output-to-string
+    (lambda ()
+      (mark-file-dirty! "/tmp/dirty.rkt")))
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (handle-tab-close-request "/tmp/dirty.rkt"))))
+  (define msgs (parse-all-messages output))
+  (check-true
+   (ormap (lambda (m)
+            (equal? (hash-ref m 'type #f) "dialog:confirm"))
+          msgs))
+  (check-false
+   (ormap (lambda (m)
+            (equal? (hash-ref m 'type #f) "tab:close"))
+          msgs)))
+
+(test-case "dialog:confirm:result dont-save closes tab"
+  (reset-cells!)
+  (with-output-to-string
+    (lambda ()
+      (mark-file-dirty! "/tmp/dirty.rkt")))
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (handle-dialog-result
+         (make-message "dialog:confirm:result"
+                       'id "close:/tmp/dirty.rkt"
+                       'choice "dont-save")))))
+  (define msgs (parse-all-messages output))
+  (check-true
+   (ormap (lambda (m)
+            (and (equal? (hash-ref m 'type #f) "tab:close")
+                 (equal? (hash-ref m 'path #f) "/tmp/dirty.rkt")))
+          msgs))
+  (check-false (file-dirty? "/tmp/dirty.rkt")))
+
+(test-case "dialog:confirm:result save sets pending-close"
+  (reset-cells!)
+  (with-output-to-string
+    (lambda ()
+      (mark-file-dirty! "/tmp/dirty.rkt")))
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (handle-dialog-result
+         (make-message "dialog:confirm:result"
+                       'id "close:/tmp/dirty.rkt"
+                       'choice "save")))))
+  (define msgs (parse-all-messages output))
+  ;; Should send editor:request-save
+  (check-true
+   (ormap (lambda (m)
+            (equal? (hash-ref m 'type #f) "editor:request-save"))
+          msgs))
+  (check-true (pending-close? "/tmp/dirty.rkt")))
+
 (displayln "All Phase 4 tests passed!")

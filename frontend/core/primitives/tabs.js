@@ -155,6 +155,25 @@ class HmTabs extends LitElement {
         this._dirtyPaths = new Set(dirtyCell.value || []);
         this.requestUpdate();
       });
+
+      // Listen for tab:close from Racket (after dirty-check dialog)
+      this._unsubs.push(
+        onMessage('tab:close', (msg) => {
+          const { path } = msg;
+          this._tabs = this._tabs.filter(t => t.path !== path);
+          if (this._activePath === path) {
+            if (this._tabs.length > 0) {
+              const newActive = this._tabs[this._tabs.length - 1].path;
+              this._activePath = newActive;
+              dispatch('tab:select', { path: newActive });
+            } else {
+              this._activePath = '';
+              dispatch('tab:close-all');
+            }
+          }
+          this.requestUpdate();
+        })
+      );
     }, 0);
   }
 
@@ -184,18 +203,7 @@ class HmTabs extends LitElement {
 
   _closeTab(e, path) {
     e.stopPropagation();
-    this._tabs = this._tabs.filter((t) => t.path !== path);
-    if (this._activePath === path) {
-      if (this._tabs.length > 0) {
-        const newActive = this._tabs[this._tabs.length - 1].path;
-        this._activePath = newActive;
-        dispatch("tab:select", { path: newActive });
-      } else {
-        this._activePath = "";
-        dispatch("tab:close-all");
-      }
-    }
-    this.requestUpdate();
+    dispatch('tab:close-request', { path });
   }
 
   render() {
