@@ -494,6 +494,44 @@ fn handle_intercepted_message(
             true
         }
 
+        // ----- Dialogs ---------------------------------------------------
+        "dialog:confirm" => {
+            let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let title = msg.get("title").and_then(|v| v.as_str()).unwrap_or("Confirm").to_string();
+            let message = msg.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let save_label = msg.get("save_label").and_then(|v| v.as_str()).unwrap_or("Save").to_string();
+            let dont_save_label = msg.get("dont_save_label").and_then(|v| v.as_str()).unwrap_or("Don\u{2019}t Save").to_string();
+            let cancel_label = msg.get("cancel_label").and_then(|v| v.as_str()).unwrap_or("Cancel").to_string();
+            let tx = tx.clone();
+            let app = app.clone();
+            thread::spawn(move || {
+                use tauri_plugin_dialog::{MessageDialogButtons, MessageDialogKind, MessageDialogResult};
+                let result = app.dialog()
+                    .message(&message)
+                    .title(&title)
+                    .kind(MessageDialogKind::Warning)
+                    .buttons(MessageDialogButtons::YesNoCancelCustom(
+                        save_label.clone(),
+                        dont_save_label.clone(),
+                        cancel_label.clone(),
+                    ))
+                    .blocking_show_with_result();
+                let choice = match result {
+                    MessageDialogResult::Custom(ref s) if s == &save_label => "save",
+                    MessageDialogResult::Custom(ref s) if s == &dont_save_label => "dont-save",
+                    MessageDialogResult::Yes => "save",
+                    MessageDialogResult::No => "dont-save",
+                    _ => "cancel",
+                };
+                let _ = tx.send(serde_json::json!({
+                    "type": "dialog:confirm:result",
+                    "id": id,
+                    "choice": choice,
+                }));
+            });
+            true
+        }
+
         // ----- JS Eval (Racket → WebView → Racket) --------------------------
         "eval:exec" => {
             let id = msg
