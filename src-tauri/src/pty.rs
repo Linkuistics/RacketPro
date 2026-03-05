@@ -88,20 +88,31 @@ impl PtyManager {
                             .wait()
                             .map(|s| s.exit_code() as i64)
                             .unwrap_or(0);
-                        let _ =
-                            app_handle.emit("pty:exit", json!({ "id": pty_id, "code": code }));
+                        // Dispatch emit to main thread to avoid dispatch_sync
+                        // deadlock on macOS WKWebView (see bridge.rs).
+                        let app = app_handle.clone();
+                        let id = pty_id.clone();
+                        let _ = app_handle.run_on_main_thread(move || {
+                            let _ = app.emit("pty:exit", json!({ "id": id, "code": code }));
+                        });
                         break;
                     }
                     Ok(n) => {
                         let data = String::from_utf8_lossy(&buf[..n]).to_string();
-                        let _ = app_handle
-                            .emit("pty:output", json!({ "id": pty_id, "data": data }));
+                        let app = app_handle.clone();
+                        let id = pty_id.clone();
+                        let _ = app_handle.run_on_main_thread(move || {
+                            let _ = app.emit("pty:output", json!({ "id": id, "data": data }));
+                        });
                     }
                     Err(e) => {
                         log::error!("PTY read error for {}: {}", pty_id, e);
                         let _ = child.wait();
-                        let _ =
-                            app_handle.emit("pty:exit", json!({ "id": pty_id, "code": -1 }));
+                        let app = app_handle.clone();
+                        let id = pty_id.clone();
+                        let _ = app_handle.run_on_main_thread(move || {
+                            let _ = app.emit("pty:exit", json!({ "id": id, "code": -1 }));
+                        });
                         break;
                     }
                 }

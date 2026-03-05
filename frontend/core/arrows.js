@@ -2,6 +2,10 @@
 //
 // Draws Bezier curves between binding sites and references
 // on a transparent SVG layer over the Monaco editor.
+//
+// Arrows are hidden by default. When the user hovers over a symbol
+// that is at one end of an arrow, only the arrows connected to that
+// symbol are shown (matching DrRacket's behavior).
 
 import { onArrowsUpdated, getArrows } from './lang-intel.js';
 
@@ -16,6 +20,7 @@ export class ArrowOverlay {
     this._editor = editor;
     this._monaco = monaco;
     this._arrows = [];
+    this._visibleArrows = [];
     this._svg = null;
     this._disposables = [];
 
@@ -32,9 +37,23 @@ export class ArrowOverlay {
       })
     );
 
+    // Show arrows on hover.
+    // We intentionally do NOT use Monaco's onMouseLeave — WKWebView fires
+    // spurious mouseLeave events when SVG paths render (even with the SVG
+    // outside Monaco's DOM tree), and once mouseLeave fires, Monaco stops
+    // sending mouseMove, so there's nothing to cancel the hide timer.
+    // Instead, arrows clear naturally when onMouseMove reports a position
+    // with no matching arrows.  If the mouse leaves the editor entirely,
+    // arrows persist until the next hover — matching DrRacket's behavior.
+    this._disposables.push(
+      editor.onMouseMove((e) => this._onMouseMove(e))
+    );
+
     // Listen for arrow updates from lang-intel
     onArrowsUpdated((uri, arrows) => {
+      console.log(`[arrows] update received: ${arrows.length} arrows for ${uri}`);
       this._arrows = arrows;
+      this._visibleArrows = [];
       this._render();
     });
 
@@ -43,6 +62,7 @@ export class ArrowOverlay {
 
   _createSvg(shadowRoot) {
     this._svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    this._svg.classList.add('hm-arrow-overlay');
     this._svg.style.position = 'absolute';
     this._svg.style.top = '0';
     this._svg.style.left = '0';
@@ -68,12 +88,15 @@ export class ArrowOverlay {
     }
     this._svg.appendChild(defs);
 
-    // Insert SVG into the editor's container within the shadow root
-    const editorContainer = shadowRoot.getElementById('editor-container');
-    if (editorContainer) {
-      editorContainer.style.position = 'relative';
-      editorContainer.appendChild(this._svg);
-    }
+    // Place SVG directly in shadow root as a sibling of #editor-container,
+    // NOT inside it.  This keeps the SVG entirely outside Monaco's DOM
+    // tree, preventing WKWebView reflows (triggered by rendering SVG paths)
+    // from firing Monaco's onMouseLeave — which was causing arrows to
+    // disappear immediately after appearing.
+    //
+    // The :host element has position:relative, so the SVG's position:absolute
+    // is relative to the host and overlays the editor container exactly.
+    shadowRoot.appendChild(this._svg);
   }
 
   _updateSize() {
@@ -82,14 +105,82 @@ export class ArrowOverlay {
     this._svg.setAttribute('height', layout.height);
   }
 
+  /**
+   * Check if a position (line, column) falls within a range.
+   * Ranges use Racket's 0-based columns; Monaco positions are 1-based.
+   */
+  _posInRange(line, col1based, range) {
+    const col = col1based - 1; // convert to 0-based for range comparison
+    if (line < range.startLine || line > range.endLine) return false;
+    if (line === range.startLine && col < range.startCol) return false;
+    if (line === range.endLine && col >= range.endCol) return false;
+    return true;
+  }
+
+  /**
+   * Find all arrows where the given position touches either endpoint.
+   */
+  _arrowsAtPosition(line, col) {
+    return this._arrows.filter((arrow) =>
+      this._posInRange(line, col, arrow.from) ||
+      this._posInRange(line, col, arrow.to)
+    );
+  }
+
+  _onMouseMove(e) {
+    if (!e.target?.position) {
+      // Mouse is over non-content area (scrollbar, margin, minimap).
+      // Don't clear arrows — the user may still be near the symbol.
+      return;
+    }
+
+    const { lineNumber, column } = e.target.position;
+    const matched = this._arrowsAtPosition(lineNumber, column);
+
+    if (matched.length > 0) {
+      console.log(`[arrows] hover match: ${matched.length} arrows at L${lineNumber}:${column}, total arrows: ${this._arrows.length}`);
+    }
+
+    // Avoid re-rendering if the same arrows are already visible
+    if (matched.length === this._visibleArrows.length &&
+        matched.every((a, i) => a === this._visibleArrows[i])) {
+      return;
+    }
+
+    this._visibleArrows = matched;
+    this._render();
+  }
+
   _render() {
     // Clear existing arrows
     const existing = this._svg.querySelectorAll('.hm-arrow');
     existing.forEach((el) => el.remove());
 
-    const layout = this._editor.getLayoutInfo();
+    // One-shot diagnostic: dump the stacking context the first time
+    // we actually render visible arrows (editor must be on-screen).
+    if (this._visibleArrows.length > 0 && !this._diagDone) {
+      this._diagDone = true;
+      let el = this._svg;
+      const chain = [];
+      while (el && chain.length < 12) {
+        const cs = getComputedStyle(el);
+        chain.push(
+          `${el.tagName}${el.id ? '#'+el.id : ''}.${(el.className?.baseVal || el.className || '').substring(0,50).trim()}` +
+          ` | pos=${cs.position} z=${cs.zIndex} overflow=${cs.overflow}` +
+          ` opacity=${cs.opacity} contain=${cs.contain || 'none'} isolation=${cs.isolation}`
+        );
+        el = el.parentElement;
+      }
+      console.log('[arrows] STACKING CONTEXT:\n' + chain.join('\n'));
+    }
 
-    for (const arrow of this._arrows) {
+    const layout = this._editor.getLayoutInfo();
+    const svgW = this._svg.getAttribute('width');
+    const svgH = this._svg.getAttribute('height');
+    const parent = this._svg.parentNode;
+    console.log(`[arrows] _render: ${this._visibleArrows.length} visible, svg=${svgW}x${svgH}, parent=${parent?.id || parent?.tagName || 'NONE'}, inDOM=${this._svg.isConnected}`);
+
+    for (const arrow of this._visibleArrows) {
       const fromRange = arrow.from;
       const toRange = arrow.to;
       const kind = arrow.kind || 'binding';
@@ -106,11 +197,17 @@ export class ArrowOverlay {
       });
 
       // Skip if either endpoint is off-screen
-      if (!fromPos || !toPos) continue;
+      if (!fromPos || !toPos) {
+        console.log(`[arrows]   skipped (off-screen): from=${JSON.stringify(fromPos)}, to=${JSON.stringify(toPos)}`);
+        continue;
+      }
 
-      const x1 = fromPos.left + layout.contentLeft;
+      // getScrolledVisiblePosition().left already includes the gutter
+      // offset (glyphMarginWidth + lineNumbersWidth + decorationsWidth),
+      // so we must NOT add layout.contentLeft — that double-counts.
+      const x1 = fromPos.left;
       const y1 = fromPos.top + fromPos.height / 2;
-      const x2 = toPos.left + layout.contentLeft;
+      const x2 = toPos.left;
       const y2 = toPos.top + toPos.height / 2;
 
       // Bezier curve (arches above for same-line, to the side for multi-line)
@@ -133,6 +230,7 @@ export class ArrowOverlay {
       }
 
       this._svg.appendChild(path);
+      console.log(`[arrows]   path: ${kind} (${x1.toFixed(0)},${y1.toFixed(0)})→(${x2.toFixed(0)},${y2.toFixed(0)}) d="${path.getAttribute('d')}"`);
     }
   }
 

@@ -2,6 +2,7 @@
 
 (require racket/class
          racket/list
+         racket/path
          racket/string
          syntax/modread
          drracket/check-syntax
@@ -126,11 +127,33 @@
   (define trace (new build-trace% [src uri]))
   (define error-diagnostics '())
 
+  ;; Extract source location from syntax errors when available
+  (define (error-range-from-exn e)
+    (cond
+      [(exn:fail:syntax? e)
+       (define exprs (exn:fail:syntax-exprs e))
+       (for/first ([stx (in-list exprs)]
+                   #:when (syntax-position stx))
+         (define pos (sub1 (syntax-position stx))) ; syntax-position is 1-based
+         (define span (or (syntax-span stx) 1))
+         (cons pos (+ pos span)))]
+      [(exn:fail:read? e)
+       (define srclocs (exn:fail:read-srclocs e))
+       (for/first ([loc (in-list srclocs)]
+                   #:when (srcloc-position loc))
+         (define pos (sub1 (srcloc-position loc)))
+         (define span (or (srcloc-span loc) 1))
+         (cons pos (+ pos span)))]
+      [else #f]))
+
   (with-handlers
     ([exn:fail?
       (lambda (e)
+        (define range (error-range-from-exn e))
+        (define from-pos (if range (car range) 0))
+        (define to-pos (if range (cdr range) (min 1 (string-length text))))
         (set! error-diagnostics
-              (list (hasheq 'from 0 'to (min 1 (string-length text))
+              (list (hasheq 'from from-pos 'to to-pos
                             'severity "error"
                             'message (exn-message e)
                             'source "check-syntax"))))])
@@ -138,11 +161,19 @@
     (define port (open-input-string text))
     (port-count-lines! port)
 
+    ;; Resolve relative requires from the file's directory, not cwd
+    (define file-dir
+      (let ([p (string->path uri)])
+        (define-values (base name dir?) (split-path p))
+        (if (path? base) base (current-directory))))
+
     (define-values (expanded-expression expansion-completed)
       (make-traversal (make-base-namespace) uri))
 
     (parameterize ([current-annotations trace]
-                   [current-namespace (make-base-namespace)])
+                   [current-namespace (make-base-namespace)]
+                   [current-load-relative-directory file-dir]
+                   [current-directory file-dir])
       (expanded-expression
        (expand
         (with-module-reading-parameterization

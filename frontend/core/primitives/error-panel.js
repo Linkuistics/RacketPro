@@ -43,9 +43,9 @@ class HmErrorPanel extends LitElement {
 
     .row {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 8px;
-      padding: 3px 8px;
+      padding: 4px 8px;
       cursor: pointer;
       border-bottom: 1px solid #EEE;
     }
@@ -58,6 +58,7 @@ class HmErrorPanel extends LitElement {
       flex-shrink: 0;
       width: 14px;
       text-align: center;
+      padding-top: 1px;
     }
 
     .icon.error { color: #D32F2F; }
@@ -66,16 +67,15 @@ class HmErrorPanel extends LitElement {
 
     .message {
       flex: 1;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
       color: #333;
+      word-break: break-word;
     }
 
     .location {
       flex-shrink: 0;
       color: #888;
       font-size: 11px;
+      padding-top: 1px;
     }
 
     .empty {

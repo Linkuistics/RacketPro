@@ -28,9 +28,11 @@ fn send_to_racket(state: State<'_, AppState>, message: Value) -> Result<(), Stri
 /// ready to receive events.  Flushes any messages queued during startup.
 #[tauri::command]
 fn frontend_ready(state: State<'_, AppState>) {
+    eprintln!("[bridge] frontend_ready: starting flush");
     if let Some(bridge) = state.bridge.as_ref() {
         bridge.flush_pending();
     }
+    eprintln!("[bridge] frontend_ready: flush complete, returning to WebView");
 }
 
 /// Tauri command: write data to a PTY instance (keyboard input from the terminal).
@@ -97,7 +99,7 @@ pub fn run() {
             };
 
             let script_str = script_path.to_string_lossy().to_string();
-            log::info!("Racket script path: {script_str}");
+            eprintln!("[bridge] Racket script path: {script_str}");
 
             // Create PtyManager first — shared between the bridge and Tauri commands.
             let pty_manager = PtyManager::new();
@@ -108,11 +110,11 @@ pub fn run() {
                 pty_manager.clone(),
             ) {
                 Ok(b) => {
-                    log::info!("Racket bridge started successfully");
+                    eprintln!("[bridge] Racket bridge started successfully");
                     Some(Arc::new(b))
                 }
                 Err(e) => {
-                    log::error!("Failed to start Racket bridge: {e}");
+                    eprintln!("[bridge] Failed to start Racket bridge: {e}");
                     None
                 }
             };

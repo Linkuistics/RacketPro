@@ -65,6 +65,7 @@ export function initLangIntel(monaco, editor) {
   // ── Arrows ──
   onMessage('intel:arrows', (msg) => {
     const { uri, arrows } = msg;
+    console.log(`[lang-intel] intel:arrows received: ${arrows.length} arrows for ${uri}, callback=${!!arrowUpdateCallback}`);
     arrowsCache.set(uri, arrows);
     if (arrowUpdateCallback) arrowUpdateCallback(uri, arrows);
   });

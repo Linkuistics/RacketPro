@@ -234,6 +234,18 @@ fn handle_menu_set(app: &AppHandle, menu_data: &Value) {
 
 /// Process a single message from Racket: intercept if appropriate, otherwise
 /// forward to the frontend via a Tauri event.
+/// Process a single message from Racket: intercept if appropriate, otherwise
+/// forward to the frontend via a Tauri event.
+///
+/// IMPORTANT: We must NOT call `app.emit()` directly from the reader thread.
+/// On macOS, wry's `evaluate_script` uses `dispatch_sync` to the main queue
+/// when called from a non-main thread.  If the main thread is busy servicing
+/// WebView IPC (e.g. `event.listen()` responses), the reader thread deadlocks
+/// waiting for `dispatch_sync` to complete.
+///
+/// Instead, we dispatch the emit to the main thread via `run_on_main_thread`,
+/// which is async (non-blocking).  The emit then runs on the main thread
+/// where wry calls `evaluateJavaScript` directly without `dispatch_sync`.
 fn process_message(
     msg_type: &str,
     msg: &Value,
@@ -244,9 +256,15 @@ fn process_message(
     let intercepted = handle_intercepted_message(msg_type, msg, app, tx, pty);
     if !intercepted {
         let event_name = format!("racket:{msg_type}");
-        if let Err(e) = app.emit(&event_name, msg) {
-            log::error!("Failed to emit Tauri event {event_name}: {e}");
-        }
+        let app_clone = app.clone();
+        let msg_clone = msg.clone();
+        eprintln!("[bridge]   emit → {event_name}");
+        let _ = app.run_on_main_thread(move || {
+            if let Err(e) = app_clone.emit(&event_name, &msg_clone) {
+                eprintln!("[bridge]   emit FAILED {event_name}: {e}");
+            }
+            eprintln!("[bridge]   emit ✓ {event_name}");
+        });
     }
 }
 
@@ -266,9 +284,13 @@ fn handle_intercepted_message(
             if let Some(menu_data) = msg.get("menu") {
                 let app_clone = app.clone();
                 let menu_data = menu_data.clone();
+                eprintln!("[bridge]   menu:set scheduling on main thread");
                 let _ = app.run_on_main_thread(move || {
+                    eprintln!("[bridge]   menu:set handler START (main thread)");
                     handle_menu_set(&app_clone, &menu_data);
+                    eprintln!("[bridge]   menu:set handler DONE (main thread)");
                 });
+                eprintln!("[bridge]   menu:set scheduled");
             } else {
                 log::warn!("menu:set message missing 'menu' field");
             }
@@ -277,6 +299,7 @@ fn handle_intercepted_message(
 
         // ----- PTY ---------------------------------------------------------
         "pty:create" => {
+            eprintln!("[bridge]   pty:create START");
             let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let command = msg
                 .get("command")
@@ -295,8 +318,9 @@ fn handle_intercepted_message(
             let rows = msg.get("rows").and_then(|v| v.as_u64()).unwrap_or(24) as u16;
 
             if let Err(e) = pty.create(id, command, &args, cols, rows, app.clone()) {
-                log::error!("pty:create failed: {e}");
+                eprintln!("[bridge]   pty:create FAILED: {e}");
             }
+            eprintln!("[bridge]   pty:create DONE");
             true
         }
         "pty:write" => {
@@ -623,12 +647,14 @@ impl RacketBridge {
                                 // emitting events while WKWebView is still loading,
                                 // which can cause a deadlock on macOS.
                                 if !reader_ready.load(Ordering::Acquire) {
+                                    eprintln!("[bridge] queuing (frontend not ready): {msg_type}");
                                     if let Ok(mut q) = reader_pending.lock() {
                                         q.push((msg_type, msg));
                                     }
                                     continue;
                                 }
 
+                                eprintln!("[bridge] processing live: {msg_type}");
                                 process_message(
                                     &msg_type,
                                     &msg,
@@ -636,6 +662,7 @@ impl RacketBridge {
                                     &reader_tx,
                                     &reader_pty,
                                 );
+                                eprintln!("[bridge] processing done: {msg_type}");
                             }
                             Err(e) => {
                                 log::warn!(
@@ -681,16 +708,19 @@ impl RacketBridge {
             std::mem::take(&mut *q)
         };
 
-        log::info!("Flushing {} queued messages", queued.len());
-        for (msg_type, msg) in queued {
+        let count = queued.len();
+        eprintln!("[bridge] flush_pending: {count} queued messages");
+        for (i, (msg_type, msg)) in queued.iter().enumerate() {
+            eprintln!("[bridge] flush {}/{count}: {msg_type}", i + 1);
             process_message(
-                &msg_type,
-                &msg,
+                msg_type,
+                msg,
                 &self.app_handle,
                 &self.tx,
                 &self.pty_manager,
             );
         }
+        eprintln!("[bridge] flush_pending complete");
     }
 
     /// Kill the child Racket process (idempotent).

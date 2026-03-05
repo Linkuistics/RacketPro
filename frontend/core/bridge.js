@@ -5,6 +5,22 @@
 // message received from the Racket process.  This module normalises them
 // into plain type strings (e.g. "cell:update") and dispatches to
 // registered handlers.
+//
+// ── Bridge lifecycle FSM ──────────────────────────────────────────────
+//
+//   idle ──initBridge()──→ booting ──signalReady()──→ ready ⇄ dispatching
+//
+//   idle        No Tauri API yet.  ensureListener() is a no-op.
+//   booting     Tauri API available.  Handlers register, but no
+//               event.listen() IPC calls — they're batched for
+//               signalReady() to avoid WKWebView deadlocks.
+//   ready       Normal operation.  New listeners register immediately.
+//   dispatching Inside a Tauri event callback.  New listeners are
+//               deferred to a macrotask (WKWebView deadlock avoidance).
+// ──────────────────────────────────────────────────────────────────────
+
+/** @type {'idle'|'booting'|'ready'|'dispatching'} */
+let _state = 'idle';
 
 /** @type {Map<string, Set<function>>} */
 const handlers = new Map();
@@ -16,31 +32,99 @@ const activeListeners = new Map();
 let tauriListen = null;
 
 /**
- * Ensure a Tauri event listener exists for the given message type.
- * Lazily creates one the first time a handler is registered for a type,
- * so new message types from Racket work without updating a whitelist.
+ * Queue for listener types awaiting sequential registration.
+ * Used by both `dispatching` (deferred to macrotask) and `ready`
+ * (immediate but serialised) states to ensure only one event.listen()
+ * IPC call is in flight at a time — concurrent calls deadlock WKWebView.
+ */
+const _listenerQueue = [];
+let _processingQueue = false;
+
+/**
+ * Process the listener registration queue one type at a time.
+ * Re-entrant safe: if already running, new entries are picked up
+ * by the existing while-loop iteration.
+ */
+async function processListenerQueue() {
+  if (_processingQueue) return;
+  _processingQueue = true;
+  try {
+    while (_listenerQueue.length > 0) {
+      const type = _listenerQueue.shift();
+      if (activeListeners.get(type) !== null) continue; // already registered
+      await registerListener(type);
+      console.log(`[bridge] queued listener registered: "${type}"`);
+    }
+  } finally {
+    _processingQueue = false;
+  }
+}
+
+/**
+ * Register a Tauri event listener for the given message type.
  *
  * @param {string} type — message type, e.g. "cell:update"
  */
-async function ensureListener(type) {
-  if (activeListeners.has(type) || !tauriListen) return;
-
+async function registerListener(type) {
   const tauriEventName = `racket:${type}`;
   const unlisten = await tauriListen(tauriEventName, (event) => {
     const msg = event.payload;
     console.debug(`[bridge] <-- ${type}`, msg);
     const cbs = handlers.get(type);
     if (cbs) {
-      for (const cb of cbs) {
-        try {
-          cb(msg);
-        } catch (err) {
-          console.error(`[bridge] handler error for "${type}":`, err);
+      const prev = _state;
+      _state = 'dispatching';
+      try {
+        for (const cb of cbs) {
+          try {
+            cb(msg);
+          } catch (err) {
+            console.error(`[bridge] handler error for "${type}":`, err);
+          }
         }
+      } finally {
+        _state = prev;
       }
     }
   });
   activeListeners.set(type, unlisten);
+}
+
+/**
+ * Ensure a Tauri event listener exists for the given message type.
+ * Behaviour depends on the current FSM state — see diagram above.
+ *
+ * @param {string} type — message type, e.g. "cell:update"
+ */
+function ensureListener(type) {
+  if (activeListeners.has(type)) return;
+
+  // Mark as pending so concurrent calls don't double-register
+  activeListeners.set(type, null);
+
+  switch (_state) {
+    case 'idle':
+    case 'booting':
+      // No IPC calls during boot — signalReady() will batch-register
+      // all pending types sequentially to avoid WKWebView deadlock.
+      return;
+
+    case 'dispatching':
+      // Defer to a macrotask — calling event.listen() from inside a
+      // WKWebView evaluateJavaScript callback deadlocks macOS.
+      // The queue ensures sequential registration even when multiple
+      // types are deferred in the same dispatch cycle.
+      _listenerQueue.push(type);
+      setTimeout(() => processListenerQueue(), 0);
+      return;
+
+    case 'ready':
+      // Queue for sequential processing — even outside a dispatch,
+      // concurrent event.listen() IPC calls can deadlock WKWebView.
+      _listenerQueue.push(type);
+      processListenerQueue();
+      return;
+  }
 }
 
 /**
@@ -91,12 +175,11 @@ export async function dispatch(event, payload = {}) {
 }
 
 /**
- * Initialise the bridge.
+ * Initialise the bridge.  Transitions: idle → booting.
  *
  * Stores a reference to the Tauri `listen` function so that `onMessage()`
- * can lazily register listeners for any message type.  After init, signals
- * the Rust backend via the `frontend_ready` command so that queued startup
- * messages are flushed to the WebView.
+ * can collect handler registrations.  Does NOT call frontend_ready —
+ * the caller must call signalReady() after all handlers are registered.
  */
 export async function initBridge() {
   tauriListen = window.__TAURI__?.event?.listen;
@@ -104,23 +187,46 @@ export async function initBridge() {
     console.warn('[bridge] Tauri event API not available — running outside Tauri?');
     return;
   }
+  _state = 'booting';
+  console.log(`[bridge] ${_state}: bridge initialised`);
+}
 
-  // Eagerly register listeners for any types that already have handlers
-  // (registered before initBridge was called).
-  for (const type of handlers.keys()) {
-    await ensureListener(type);
+/**
+ * Register all pending listeners, then signal Rust to flush.
+ * Transitions: booting → ready.
+ *
+ * Must be called AFTER all init functions (initCells, initRenderer, etc.)
+ * have registered their handlers via onMessage().
+ */
+export async function signalReady() {
+  if (_state !== 'booting') return;
+
+  // Register all pending listeners sequentially — each await completes
+  // before the next IPC call, avoiding concurrent event.listen() calls
+  // that deadlock WKWebView on macOS.
+  //
+  // We loop until no pending types remain because async component init
+  // (e.g. Monaco dynamic import → initLangIntel) can add new types
+  // between our await calls while we're still in 'booting' state.
+  let pending;
+  while ((pending = [...activeListeners.entries()]
+    .filter(([, unlisten]) => unlisten === null)
+    .map(([type]) => type)).length > 0) {
+    console.log(`[bridge] ${_state}: registering ${pending.length} listeners:`, pending);
+    for (const type of pending) {
+      await registerListener(type);
+    }
   }
 
-  // Signal the Rust backend that our listeners are ready — this flushes
-  // any messages that Racket emitted before the WebView was loaded.
+  _state = 'ready';
+  console.log(`[bridge] ${_state}: all listeners registered, calling frontend_ready...`);
+
   try {
     await window.__TAURI__.core.invoke('frontend_ready');
-    console.log('[bridge] frontend_ready acknowledged — queued messages flushed');
+    console.log(`[bridge] ${_state}: queued messages flushed`);
   } catch (err) {
-    console.error('[bridge] frontend_ready invoke failed:', err);
+    console.error(`[bridge] frontend_ready invoke failed:`, err);
   }
-
-  console.log('[bridge] Bridge initialised');
 }
 
 // ---------------------------------------------------------------------------

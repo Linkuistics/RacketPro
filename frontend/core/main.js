@@ -3,7 +3,7 @@
 // Wires together the Tauri bridge, reactive cell registry, layout
 // renderer, and all primitive web components.
 
-import { initBridge, onMessage } from './bridge.js';
+import { initBridge, signalReady, onMessage } from './bridge.js';
 import { initCells } from './cells.js';
 import { initRenderer } from './renderer.js';
 import './primitives/layout.js';
@@ -20,14 +20,27 @@ import './primitives/error-panel.js';
 import './lang-intel.js';
 
 async function boot() {
-  console.log('[HeavyMental] Booting...');
+  console.log('[boot] 1/5 starting...');
+
+  // Phase 1: Set up the bridge (registers tauriListen but does NOT flush)
   await initBridge();
+  console.log('[boot] 2/5 bridge initialised');
+
+  // Phase 2: Register all message handlers — these call onMessage() which
+  // triggers ensureListener() to register Tauri event listeners eagerly.
   initCells();
+  console.log('[boot] 3/5 cells initialised');
   const app = document.getElementById('app');
   app.textContent = '';
   initRenderer(app);
-  onMessage('lifecycle:ready', () => console.log('[HeavyMental] Racket core is ready'));
-  console.log('[HeavyMental] Frontend ready, waiting for Racket...');
+  console.log('[boot] 4/5 renderer initialised');
+  onMessage('lifecycle:ready', () => console.log('[boot] Racket core is ready'));
+
+  // Phase 3: Signal ready — now that all listeners are registered, tell
+  // Rust to flush queued messages.  Events arrive into existing listeners.
+  await signalReady();
+
+  console.log('[boot] 5/5 signalReady complete — frontend ready');
 }
 
 boot().catch(e => console.error('[HeavyMental] Boot failed:', e));
