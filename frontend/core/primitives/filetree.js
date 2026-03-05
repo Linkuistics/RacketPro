@@ -270,6 +270,7 @@ class HmFiletree extends LitElement {
     /** @type {string|null} Currently active (clicked) file. */
     this._activeFile = null;
     this._disposeEffect = null;
+    this._disposeActiveSync = null;
     this._resolvedRoot = '';
     this._rootExpanded = true;
   }
@@ -283,6 +284,10 @@ class HmFiletree extends LitElement {
     if (this._disposeEffect) {
       this._disposeEffect();
       this._disposeEffect = null;
+    }
+    if (this._disposeActiveSync) {
+      this._disposeActiveSync();
+      this._disposeActiveSync = null;
     }
   }
 
@@ -304,6 +309,22 @@ class HmFiletree extends LitElement {
       this._resolvedRoot = this.rootPath;
       this._loadDir(this.rootPath);
     }
+
+    // Sync active file with current-file cell
+    const currentFileCell = getCell('current-file');
+    this._disposeActiveSync = effect(() => {
+      const filePath = currentFileCell.value;
+      if (filePath && filePath !== this._activeFile) {
+        this._activeFile = filePath;
+        this._autoReveal(filePath);
+        this.requestUpdate();
+        // Scroll into view after render
+        this.updateComplete.then(() => {
+          const active = this.shadowRoot.querySelector('.item.active');
+          if (active) active.scrollIntoView({ block: 'nearest' });
+        });
+      }
+    });
   }
 
   async _loadDir(path) {
@@ -339,6 +360,31 @@ class HmFiletree extends LitElement {
     this._activeFile = filePath;
     this.requestUpdate();
     dispatch('file:tree-open', { path: filePath });
+  }
+
+  /**
+   * Expand all ancestor directories of the given file path.
+   * Computes parent paths relative to the resolved root and adds
+   * them to _expanded, triggering lazy loads as needed.
+   */
+  _autoReveal(filePath) {
+    if (!this._resolvedRoot || !filePath.startsWith(this._resolvedRoot)) return;
+
+    const rel = filePath.slice(this._resolvedRoot.length);
+    const segments = rel.split('/').filter(Boolean);
+
+    // Build up ancestor paths and expand each
+    let current = this._resolvedRoot;
+    for (let i = 0; i < segments.length - 1; i++) {
+      current = current + '/' + segments[i];
+      if (!this._expanded.has(current)) {
+        this._expanded.add(current);
+        this._loadDir(current);
+      }
+    }
+
+    // Ensure root is expanded
+    this._rootExpanded = true;
   }
 
   /**
