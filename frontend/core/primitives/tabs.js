@@ -1,8 +1,9 @@
 // primitives/tabs.js — hm-tabs
 //
-// Zed-style tab bar. Always shows ← → navigation arrows on the left.
+// Zed-style tab bar with scroll arrows for overflow navigation.
 // Active tab blends into the editor (white bg). Tab titles are centered.
 // Close button appears on hover at the far right of each tab.
+// Supports: middle-click close, right-click context menu (Close / Close Others / Close All).
 //
 // NOTE: Bridge listener registration is deferred to firstUpdated()
 // to avoid triggering ensureListener() during the synchronous
@@ -24,6 +25,7 @@ class HmTabs extends LitElement {
     :host {
       display: flex;
       align-items: stretch;
+      position: relative;
       height: var(--tab-h, 32px);
       min-height: var(--tab-h, 32px);
       background: var(--bg-tab-bar, #eaeaea);
@@ -112,6 +114,44 @@ class HmTabs extends LitElement {
     .tab-close:hover {
       background: rgba(0, 0, 0, 0.15);
     }
+
+    .scroll-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      cursor: pointer;
+      color: var(--fg-muted, #999999);
+      font-size: 16px;
+      user-select: none;
+      flex-shrink: 0;
+    }
+
+    .scroll-btn:hover {
+      color: var(--fg-primary, #333333);
+      background: var(--bg-tab-hover, #f0f0f0);
+    }
+
+    .context-menu {
+      position: absolute;
+      z-index: 1000;
+      background: var(--bg-primary, #ffffff);
+      border: 1px solid var(--border, #d4d4d4);
+      border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+      padding: 4px 0;
+      min-width: 120px;
+    }
+
+    .ctx-item {
+      padding: 4px 12px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .ctx-item:hover {
+      background: var(--bg-tab-hover, #f0f0f0);
+    }
   `;
 
   constructor() {
@@ -123,6 +163,8 @@ class HmTabs extends LitElement {
     this._disposeEffect = null;
     this._disposeDirty = null;
     this._dirtyPaths = new Set();
+    /** @type {{x: number, y: number, path: string}|null} */
+    this._contextMenu = null;
   }
 
   firstUpdated() {
@@ -206,8 +248,53 @@ class HmTabs extends LitElement {
     dispatch('tab:close-request', { path });
   }
 
+  _showContextMenu(e, path) {
+    e.preventDefault();
+    const rect = this.getBoundingClientRect();
+    this._contextMenu = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+      path,
+    };
+    this.requestUpdate();
+
+    // Close on next click anywhere
+    const close = () => {
+      this._contextMenu = null;
+      this.requestUpdate();
+      document.removeEventListener('click', close);
+    };
+    setTimeout(() => document.addEventListener('click', close), 0);
+  }
+
+  _contextClose() {
+    dispatch('tab:close-request', { path: this._contextMenu.path });
+    this._contextMenu = null;
+  }
+
+  _contextCloseOthers() {
+    const keep = this._contextMenu.path;
+    for (const tab of this._tabs) {
+      if (tab.path !== keep) dispatch('tab:close-request', { path: tab.path });
+    }
+    this._contextMenu = null;
+  }
+
+  _contextCloseAll() {
+    for (const tab of this._tabs) {
+      dispatch('tab:close-request', { path: tab.path });
+    }
+    this._contextMenu = null;
+  }
+
+  _scrollTabs(direction) {
+    const area = this.shadowRoot.querySelector('.tabs-area');
+    if (area) area.scrollBy({ left: direction * 120, behavior: 'smooth' });
+  }
+
   render() {
     return html`
+      <div class="scroll-btn left" @click=${() => this._scrollTabs(-1)}>\u2039</div>
       <div class="tabs-area">
         ${this._tabs.map(
           (tab) => {
@@ -216,8 +303,10 @@ class HmTabs extends LitElement {
             <div
               class="tab ${tab.path === this._activePath ? "active" : ""}"
               @click=${() => this._selectTab(tab.path)}
+              @auxclick=${(e) => { if (e.button === 1) { e.preventDefault(); dispatch('tab:close-request', { path: tab.path }); } }}
+              @contextmenu=${(e) => this._showContextMenu(e, tab.path)}
             >
-              <span class="tab-label">${isDirty ? '• ' : ''}${tab.name}</span>
+              <span class="tab-label">${isDirty ? '\u2022 ' : ''}${tab.name}</span>
               <span
                 class="tab-close"
                 @click=${(e) => this._closeTab(e, tab.path)}
@@ -236,6 +325,14 @@ class HmTabs extends LitElement {
           },
         )}
       </div>
+      <div class="scroll-btn right" @click=${() => this._scrollTabs(1)}>\u203A</div>
+      ${this._contextMenu ? html`
+        <div class="context-menu" style="left:${this._contextMenu.x}px;top:${this._contextMenu.y}px">
+          <div class="ctx-item" @click=${() => this._contextClose()}>Close</div>
+          <div class="ctx-item" @click=${() => this._contextCloseOthers()}>Close Others</div>
+          <div class="ctx-item" @click=${() => this._contextCloseAll()}>Close All</div>
+        </div>
+      ` : ''}
     `;
   }
 }
