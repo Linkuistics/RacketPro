@@ -98,6 +98,11 @@ class HmBreadcrumb extends LitElement {
       color: var(--accent, #007ACC);
     }
 
+    .action-btn.stop:hover {
+      background: rgba(204, 0, 0, 0.1);
+      color: #CC0000;
+    }
+
     :host([hidden]) {
       display: none;
     }
@@ -126,7 +131,7 @@ class HmBreadcrumb extends LitElement {
     const cellNames = [];
     if (this.file?.startsWith('cell:')) cellNames.push(this.file.slice(5));
     if (this.root?.startsWith('cell:')) cellNames.push(this.root.slice(5));
-    if (cellNames.length === 0) return;
+    cellNames.push('repl-running');  // Always watch this cell
 
     for (const name of cellNames) getCell(name);
     this._disposeEffect = effect(() => {
@@ -157,6 +162,8 @@ class HmBreadcrumb extends LitElement {
 
     const segments = relPath ? relPath.split(/[/\\]/).filter(Boolean) : [];
 
+    const isRunning = resolveValue('cell:repl-running') || false;
+
     return html`
       <div class="path">
         ${segments.length > 0
@@ -164,9 +171,14 @@ class HmBreadcrumb extends LitElement {
           : filePath || ''}
       </div>
       <div class="actions">
-        <span class="action-btn run" title="Run (Cmd+R)" @click=${() => this._dispatch('run')}>
-          <svg width="14" height="14" viewBox="0 0 16 16"><path d="M4 2l10 6-10 6z" fill="currentColor"/></svg>
-        </span>
+        ${isRunning
+          ? html`<span class="action-btn stop" title="Stop (restart REPL)" @click=${() => this._dispatch('repl:restart')}>
+              <svg width="14" height="14" viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" rx="1" fill="currentColor"/></svg>
+            </span>`
+          : html`<span class="action-btn run" title="Run (Cmd+R)" @click=${() => this._dispatch('run')}>
+              <svg width="14" height="14" viewBox="0 0 16 16"><path d="M4 2l10 6-10 6z" fill="currentColor"/></svg>
+            </span>`
+        }
       </div>
     `;
   }

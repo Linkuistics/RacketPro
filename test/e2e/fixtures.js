@@ -83,6 +83,7 @@ export const CELLS = [
   { name: 'cursor-pos', value: '' },
   { name: 'project-root', value: '/tmp/test-project' },
   { name: 'dirty-files', value: [] },
+  { name: 'repl-running', value: false },
 ];
 
 export const LAYOUT = {

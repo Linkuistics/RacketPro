@@ -6,6 +6,8 @@
 
 (provide start-repl
          run-file
+         clear-repl
+         restart-repl
          handle-repl-event)
 
 ;; ── REPL lifecycle ───────────────────────────────────────────
@@ -29,6 +31,17 @@
                                'id "repl"
                                'data cmd))
   (cell-set! 'status (format "Running ~a" path)))
+
+;; Clear the REPL terminal (send Ctrl+L / form feed)
+(define (clear-repl)
+  (send-message! (make-message "pty:write"
+                               'id "repl"
+                               'data "\x0c")))
+
+;; Restart the REPL (kill + recreate)
+(define (restart-repl)
+  (send-message! (make-message "pty:kill" 'id "repl"))
+  (start-repl))
 
 ;; ── Event handler ────────────────────────────────────────────
 

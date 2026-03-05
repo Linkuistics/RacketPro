@@ -15,6 +15,7 @@
 (define-cell language "")
 (define-cell cursor-pos "")
 (define-cell dirty-files (list))
+(define-cell repl-running #f)
 (define-cell project-root "")
 
 ;; ── Layout ─────────────────────────────────────────────────
@@ -184,6 +185,10 @@
        (send-message! (make-message "editor:goto"
                                     'line line
                                     'col col)))]
+    ;; REPL restart
+    [(string=? event-name "repl:restart")
+     (cell-set! 'repl-running #f)
+     (restart-repl)]
     ;; Completion request
     [(string=? event-name "intel:completion-request")
      (handle-completion-request msg)]
@@ -213,6 +218,8 @@
      (set-pending-run!)
      (send-message! (make-message "editor:request-save"))]
     [else
+     (cell-set! 'repl-running #t)
+     (clear-repl)
      (run-file path)]))
 
 ;; ── Message dispatcher ─────────────────────────────────────
@@ -234,6 +241,8 @@
        (define path (message-ref msg 'path ""))
        (when (pending-run?)
          (clear-pending-run!)
+         (cell-set! 'repl-running #t)
+         (clear-repl)
          (run-file path))
        (when (pending-close? path)
          (clear-pending-close! path)
@@ -243,6 +252,7 @@
      (handle-dialog-result msg)]
     ;; PTY events
     [(string=? typ "pty:exit")
+     (cell-set! 'repl-running #f)
      (handle-repl-event msg)]
     [(string=? typ "ping")
      (send-message! (make-message "pong"))]
