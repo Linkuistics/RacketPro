@@ -32,7 +32,8 @@
          clear-pending-run!
          pending-quit?
          set-pending-quit!
-         clear-pending-quit!)
+         clear-pending-quit!
+         handle-close-request)
 
 ;; ── Accessors for cell state ─────────────────────────────────
 ;; These read from cells defined in main.rkt via cell-ref.
@@ -138,6 +139,23 @@
 (define (pending-quit?) _pending-quit)
 (define (set-pending-quit!) (set! _pending-quit #t))
 (define (clear-pending-quit!) (set! _pending-quit #f))
+
+;; ── Window close request handler ───────────────────────────────
+;; Called when Rust intercepts the window close event.
+;; If there are dirty files, shows a save dialog; otherwise quits.
+
+(define (handle-close-request)
+  (cond
+    [(any-dirty-files?)
+     (send-message! (make-message "dialog:confirm"
+                                  'id "lifecycle:quit"
+                                  'title "Unsaved Changes"
+                                  'message "You have unsaved changes. Save before quitting?"
+                                  'save_label "Save"
+                                  'dont_save_label "Don\u2019t Save"
+                                  'cancel_label "Cancel"))]
+    [else
+     (send-message! (make-message "lifecycle:quit"))]))
 
 ;; ── Tab close with dirty check ─────────────────────────────────
 

@@ -278,17 +278,7 @@
          (send-message! (make-message "lifecycle:quit"))))]
     ;; Lifecycle: window close request — check for unsaved changes
     [(string=? typ "lifecycle:close-request")
-     (cond
-       [(any-dirty-files?)
-        (send-message! (make-message "dialog:confirm"
-                                     'id "lifecycle:quit"
-                                     'title "Unsaved Changes"
-                                     'message "You have unsaved changes. Save before quitting?"
-                                     'save_label "Save All"
-                                     'dont_save_label "Don\u2019t Save"
-                                     'cancel_label "Cancel"))]
-       [else
-        (send-message! (make-message "lifecycle:quit"))])]
+     (handle-close-request)]
     ;; Dialog results (e.g., save-before-close confirmation)
     [(string=? typ "dialog:confirm:result")
      (handle-dialog-result msg)]

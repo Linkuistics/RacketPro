@@ -336,21 +336,9 @@
   (reset-cells!)
   (clear-pending-quit!)
   (check-false (any-dirty-files?))
-  ;; Simulate the dispatch logic from main.rkt for lifecycle:close-request
   (define output
     (with-output-to-string
-      (lambda ()
-        (cond
-          [(any-dirty-files?)
-           (send-message! (make-message "dialog:confirm"
-                                        'id "lifecycle:quit"
-                                        'title "Unsaved Changes"
-                                        'message "You have unsaved changes. Save before quitting?"
-                                        'save_label "Save All"
-                                        'dont_save_label "Don\u2019t Save"
-                                        'cancel_label "Cancel"))]
-          [else
-           (send-message! (make-message "lifecycle:quit"))]))))
+      (lambda () (handle-close-request))))
   (define msgs (parse-all-messages output))
   ;; Should send lifecycle:quit directly
   (check-true
@@ -371,21 +359,9 @@
     (lambda ()
       (mark-file-dirty! "/tmp/dirty.rkt")))
   (check-true (any-dirty-files?))
-  ;; Simulate the dispatch logic
   (define output
     (with-output-to-string
-      (lambda ()
-        (cond
-          [(any-dirty-files?)
-           (send-message! (make-message "dialog:confirm"
-                                        'id "lifecycle:quit"
-                                        'title "Unsaved Changes"
-                                        'message "You have unsaved changes. Save before quitting?"
-                                        'save_label "Save All"
-                                        'dont_save_label "Don\u2019t Save"
-                                        'cancel_label "Cancel"))]
-          [else
-           (send-message! (make-message "lifecycle:quit"))]))))
+      (lambda () (handle-close-request))))
   (define msgs (parse-all-messages output))
   ;; Should send dialog:confirm
   (check-true
