@@ -104,3 +104,57 @@ test.describe('File tree editor sync', () => {
     expect(activeFile).toBe('/tmp/test-project/src/main.rkt');
   });
 });
+
+// ── Group 3: Run Experience ──────────────────────────────────────────
+
+test.describe('Run experience', () => {
+  test.beforeEach(async ({ page }) => {
+    await bootApp(page);
+    await sendBootMessages(page);
+    await waitForMonaco(page);
+  });
+
+  test('run button toggles to stop when repl-running is true', async ({ page }) => {
+    // Initially should show play button
+    const breadcrumb = page.locator('hm-breadcrumb');
+    await fireEvent(page, 'cell:update', { name: 'current-file', value: '/tmp/test.rkt' });
+    await page.waitForTimeout(100);
+
+    const playBtn = breadcrumb.locator('.action-btn.run');
+    await expect(playBtn).toBeVisible();
+
+    // Set repl-running to true
+    await fireEvent(page, 'cell:update', { name: 'repl-running', value: true });
+    await page.waitForTimeout(100);
+
+    // Should now show stop button
+    const stopBtn = breadcrumb.locator('.action-btn.stop');
+    await expect(stopBtn).toBeVisible();
+  });
+});
+
+// ── Group 4: Tab Management ─────────────────────────────────────────
+
+test.describe('Tab management', () => {
+  test.beforeEach(async ({ page }) => {
+    await bootApp(page);
+    await sendBootMessages(page);
+    await waitForMonaco(page);
+  });
+
+  test('tab:close message removes a tab', async ({ page }) => {
+    // Open two files
+    await fireEvent(page, 'editor:open', { path: '/tmp/a.rkt', content: '', language: 'racket' });
+    await fireEvent(page, 'editor:open', { path: '/tmp/b.rkt', content: '', language: 'racket' });
+    await page.waitForTimeout(100);
+
+    const tabs = page.locator('hm-tabs .tab');
+    await expect(tabs).toHaveCount(2);
+
+    // Close tab via bridge message
+    await fireEvent(page, 'tab:close', { path: '/tmp/a.rkt' });
+    await page.waitForTimeout(100);
+
+    await expect(tabs).toHaveCount(1);
+  });
+});
