@@ -21,7 +21,8 @@
 (define (filter-by-type msgs type)
   (filter (lambda (m) (equal? (hash-ref m 'type #f) type)) msgs))
 
-;; Helper: write a temp Racket file, run stepper, return parsed messages
+;; Helper: write a temp Racket file, run stepper in continue mode, return parsed messages.
+;; Uses stepper-continue to run to completion (backward compat with existing tests).
 (define (run-stepper-on-source source-text)
   (define tmp (make-temporary-file "stepper-test-~a.rkt"))
   (with-output-to-file tmp #:exists 'replace
@@ -30,10 +31,21 @@
     (with-output-to-string
       (lambda ()
         (start-stepper (path->string tmp))
+        ;; Immediately switch to continue mode so it runs to completion
+        (stepper-continue)
         ;; Wait for stepper thread to finish
         (sleep 5))))
   (delete-file tmp)
   (parse-all-messages output))
+
+;; Helper: start stepper in interactive (step) mode, return the temp file path.
+;; Caller is responsible for advancing steps and cleaning up.
+(define (start-stepper-interactive source-text)
+  (define tmp (make-temporary-file "stepper-test-~a.rkt"))
+  (with-output-to-file tmp #:exists 'replace
+    (lambda () (display source-text)))
+  (start-stepper (path->string tmp))
+  tmp)
 
 ;; ── Cells needed by the stepper ──────────────────────────────────
 
@@ -160,6 +172,8 @@
     (with-output-to-string
       (lambda ()
         (start-stepper "/tmp/nonexistent-stepper-file-12345.rkt")
+        ;; Continue in case it pauses (it won't for errors, but be safe)
+        (stepper-continue)
         (sleep 2))))
 
   (define msgs (parse-all-messages output))
@@ -277,5 +291,150 @@
                    "Last step should include binding for x")
   (check-not-false (member "y" binding-names)
                    "Last step should include binding for y"))
+
+;; ── Interactive stepping tests ───────────────────────────────────
+
+(test-case "stepper pauses after first step in step mode"
+  ;; Start stepper interactively on a multi-step program
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (define tmp (start-stepper-interactive
+                     "#lang racket\n(define x 10)\n(* x 3)\n"))
+        ;; Give the stepper thread time to produce its first step and block
+        (sleep 1)
+        ;; Should be active and paused after first step
+        (check-true (stepper-active?)
+                    "Stepper should still be active (paused)")
+        ;; Stop the stepper to clean up
+        (stop-stepper)
+        (delete-file tmp))))
+
+  ;; Parse messages: should have exactly 1 step (paused after it)
+  ;; plus cell:update messages and the stepper:finished from stop-stepper
+  (define msgs (parse-all-messages output))
+  (define step-msgs (filter-by-type msgs "stepper:step"))
+  (check-equal? (length step-msgs) 1
+                "Expected exactly 1 step before stepper paused"))
+
+(test-case "stepper-forward advances to next step"
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (define tmp (start-stepper-interactive
+                     "#lang racket\n(define x 10)\n(* x 3)\n"))
+        ;; Wait for first step
+        (sleep 1)
+        ;; Advance one step
+        (stepper-forward)
+        ;; Wait for second step
+        (sleep 1)
+        ;; Clean up
+        (stop-stepper)
+        (delete-file tmp))))
+
+  (define msgs (parse-all-messages output))
+  (define step-msgs (filter-by-type msgs "stepper:step"))
+  ;; Should have 2 steps (first auto, second from forward)
+  (check-equal? (length step-msgs) 2
+                (format "Expected 2 steps, got ~a" (length step-msgs))))
+
+(test-case "stepper-back replays previous step from history"
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (define tmp (start-stepper-interactive
+                     "#lang racket\n(define x 10)\n(* x 3)\n"))
+        ;; Wait for first step
+        (sleep 1)
+        ;; Advance to second step
+        (stepper-forward)
+        (sleep 1)
+        ;; Go back to first step
+        (stepper-back)
+        ;; Clean up
+        (stop-stepper)
+        (delete-file tmp))))
+
+  (define msgs (parse-all-messages output))
+  (define step-msgs (filter-by-type msgs "stepper:step"))
+  ;; Should have 3 step messages: step 1, step 2, step 1 (replayed)
+  (check-equal? (length step-msgs) 3
+                (format "Expected 3 step messages, got ~a" (length step-msgs)))
+  ;; The third step message should be step 1 (replayed)
+  (check-equal? (hash-ref (caddr step-msgs) 'step) 1
+                "Third step message should be step 1 (back)"))
+
+(test-case "stepper-forward replays next history step after back"
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (define tmp (start-stepper-interactive
+                     "#lang racket\n(define x 10)\n(* x 3)\n"))
+        ;; Wait for first step
+        (sleep 1)
+        ;; Advance to second step
+        (stepper-forward)
+        (sleep 1)
+        ;; Go back to first step
+        (stepper-back)
+        ;; Go forward again (replays step 2 from history)
+        (stepper-forward)
+        ;; Clean up
+        (stop-stepper)
+        (delete-file tmp))))
+
+  (define msgs (parse-all-messages output))
+  (define step-msgs (filter-by-type msgs "stepper:step"))
+  ;; step 1, step 2, step 1 (back), step 2 (forward replay)
+  (check-equal? (length step-msgs) 4
+                (format "Expected 4 step messages, got ~a" (length step-msgs)))
+  ;; Fourth message should be step 2 replayed
+  (check-equal? (hash-ref (list-ref step-msgs 3) 'step) 2
+                "Fourth step message should be step 2 (forward replay)"))
+
+(test-case "stepper-continue runs to completion"
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (define tmp (start-stepper-interactive
+                     "#lang racket\n(define x 10)\n(* x 3)\n"))
+        ;; Wait for first step
+        (sleep 1)
+        ;; Continue to finish
+        (stepper-continue)
+        (sleep 3)
+        (delete-file tmp))))
+
+  (define msgs (parse-all-messages output))
+  (define step-msgs (filter-by-type msgs "stepper:step"))
+  ;; Should have all steps (>= 2)
+  (check-true (>= (length step-msgs) 2)
+              (format "Expected >= 2 steps after continue, got ~a"
+                      (length step-msgs)))
+  ;; Should have stepper:finished
+  (define finished (filter-by-type msgs "stepper:finished"))
+  (check-equal? (length finished) 1
+                "Expected stepper:finished after continue"))
+
+(test-case "stepper-back does nothing at step 1"
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (define tmp (start-stepper-interactive
+                     "#lang racket\n(+ 1 2)\n"))
+        ;; Wait for first step
+        (sleep 1)
+        ;; Try to go back (should have no effect)
+        (stepper-back)
+        ;; Clean up
+        (stop-stepper)
+        (delete-file tmp))))
+
+  (define msgs (parse-all-messages output))
+  (define step-msgs (filter-by-type msgs "stepper:step"))
+  ;; Should have exactly 1 step (the initial one, no replay)
+  (check-equal? (length step-msgs) 1
+                "stepper-back at step 1 should produce no extra messages"))
 
 (displayln "All stepper tests passed!")

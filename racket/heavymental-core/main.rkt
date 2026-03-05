@@ -212,6 +212,12 @@
        (start-stepper path))]
     [(string=? event-name "stepper:stop")
      (stop-stepper)]
+    [(string=? event-name "stepper:forward")
+     (stepper-forward)]
+    [(string=? event-name "stepper:back")
+     (stepper-back)]
+    [(string=? event-name "stepper:continue")
+     (stepper-continue)]
     [else
      (eprintf "Unknown event: ~a\n" event-name)]))
 

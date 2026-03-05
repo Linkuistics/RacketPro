@@ -84,9 +84,10 @@ class HmStepperToolbar extends LitElement {
   }
 
   render() {
-    // NOTE: The stepper currently runs to completion — interactive
-    // forward/back stepping requires step-at-a-time execution (future work).
     return html`
+      <button id="btn-back" @click=${() => dispatch('stepper:back')}>Back</button>
+      <button id="btn-forward" @click=${() => dispatch('stepper:forward')}>Forward</button>
+      <button id="btn-continue" @click=${() => dispatch('stepper:continue')}>Continue</button>
       <button @click=${() => dispatch('stepper:stop')}>Stop</button>
       <span class="step-info">Step <span id="step-num">0</span></span>
     `;
