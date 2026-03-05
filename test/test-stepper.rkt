@@ -4,6 +4,7 @@
          json
          racket/port
          racket/string
+         racket/list
          racket/file
          "../racket/heavymental-core/protocol.rkt"
          "../racket/heavymental-core/cell.rkt"
@@ -194,5 +195,87 @@
   ;; Should have at least 2 updates: set to true, then set to false
   (check-true (>= (length active-updates) 2)
               "Expected stepper-active cell to be updated at least twice"))
+
+;; ── Bindings extraction tests ────────────────────────────────────
+
+(test-case "extract-define-binding recognizes simple numeric define"
+  (check-equal? (extract-define-binding "(define x 10)")
+                (list "x" "10"))
+  (check-equal? (extract-define-binding "(define y -3)")
+                (list "y" "-3"))
+  (check-equal? (extract-define-binding "(define z 3.14)")
+                (list "z" "3.14")))
+
+(test-case "extract-define-binding recognizes string and boolean defines"
+  (check-equal? (extract-define-binding "(define s \"hello\")")
+                (list "s" "\"hello\""))
+  (check-equal? (extract-define-binding "(define flag #t)")
+                (list "flag" "#t"))
+  (check-equal? (extract-define-binding "(define off #f)")
+                (list "off" "#f")))
+
+(test-case "extract-define-binding recognizes quoted values"
+  (check-equal? (extract-define-binding "(define sym 'foo)")
+                (list "sym" "'foo"))
+  (check-equal? (extract-define-binding "(define lst '(1 2 3))")
+                (list "lst" "'(1 2 3)")))
+
+(test-case "extract-define-binding rejects non-literal bodies"
+  ;; A define with a compound expression as body should NOT be extracted
+  (check-false (extract-define-binding "(define x (+ 1 2))"))
+  (check-false (extract-define-binding "(define y (* x 3))"))
+  ;; Not a define at all
+  (check-false (extract-define-binding "(+ 1 2)"))
+  (check-false (extract-define-binding "42")))
+
+(test-case "stepper includes bindings field in step data"
+  (define msgs
+    (run-stepper-on-source "#lang racket\n(define x 10)\n(+ x 3)\n"))
+
+  (define step-msgs (filter-by-type msgs "stepper:step"))
+  (check-true (> (length step-msgs) 0))
+
+  ;; Every before-after step should have a bindings field (possibly empty list)
+  (for ([m (in-list step-msgs)])
+    (define data (hash-ref m 'data))
+    (when (equal? (hash-ref data 'type #f) "before-after")
+      (check-true (list? (hash-ref data 'bindings))
+                  "before-after steps should include bindings list"))))
+
+(test-case "stepper includes bindings for define forms"
+  (define msgs
+    (run-stepper-on-source "#lang racket\n(define x 10)\n(+ x 3)\n"))
+
+  (define step-msgs (filter-by-type msgs "stepper:step"))
+  ;; At least one step should have bindings with x -> 10
+  (check-true
+   (ormap (lambda (m)
+            (define data (hash-ref m 'data))
+            (define bindings (hash-ref data 'bindings (list)))
+            (ormap (lambda (b)
+                     (and (equal? (hash-ref b 'name) "x")
+                          (equal? (hash-ref b 'value) "10")))
+                   bindings))
+          step-msgs)
+   "Expected at least one step with binding x=10"))
+
+(test-case "stepper accumulates bindings across multiple defines"
+  (define msgs
+    (run-stepper-on-source
+     "#lang racket\n(define x 10)\n(define y 20)\n(+ x y)\n"))
+
+  (define step-msgs (filter-by-type msgs "stepper:step"))
+  ;; The last step should have both x and y bindings
+  (define last-ba-step
+    (last (filter (lambda (m)
+                    (equal? (hash-ref (hash-ref m 'data) 'type #f)
+                            "before-after"))
+                  step-msgs)))
+  (define bindings (hash-ref (hash-ref last-ba-step 'data) 'bindings))
+  (define binding-names (map (lambda (b) (hash-ref b 'name)) bindings))
+  (check-not-false (member "x" binding-names)
+                   "Last step should include binding for x")
+  (check-not-false (member "y" binding-names)
+                   "Last step should include binding for y"))
 
 (displayln "All stepper tests passed!")

@@ -146,6 +146,23 @@ class HmBindingsPanel extends LitElement {
       color: var(--fg-muted, #999999);
       margin-bottom: 4px;
     }
+
+    .section-header {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--fg-muted, #999999);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin: 8px 0 4px;
+      padding-top: 6px;
+      border-top: 1px solid var(--border-light, #F0F0F0);
+    }
+
+    .section-header:first-child {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: none;
+    }
   `;
 
   constructor() {
@@ -183,7 +200,10 @@ class HmBindingsPanel extends LitElement {
   }
 
   render() {
+    const hasStep = this._before || this._after;
     return html`
+      ${hasStep ? html`
+        <div class="section-header">Reduction</div>` : ''}
       ${this._before ? html`
         <div class="step-expr">
           <div class="step-label">Before:</div>
@@ -194,13 +214,15 @@ class HmBindingsPanel extends LitElement {
           <div class="step-label">After:</div>
           <code>${this._after}</code>
         </div>` : ''}
-      ${this._bindings.length > 0
-        ? this._bindings.map(b => html`
+      ${this._bindings.length > 0 ? html`
+        <div class="section-header">Bindings</div>
+        ${this._bindings.map(b => html`
             <div class="binding">
               <span class="name">${b.name}</span>
               <span class="value">${b.value}</span>
-            </div>`)
-        : html`<div class="empty">No bindings</div>`}
+            </div>`)}
+      ` : hasStep ? html`<div class="section-header">Bindings</div>
+        <div class="empty">No variable bindings yet</div>` : ''}
     `;
   }
 }

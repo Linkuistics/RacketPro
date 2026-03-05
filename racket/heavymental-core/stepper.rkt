@@ -11,6 +11,7 @@
          racket/string
          racket/format
          racket/file
+         racket/list
          stepper/private/model
          stepper/private/model-settings
          stepper/private/shared-typed
@@ -20,15 +21,51 @@
 
 (provide start-stepper
          stop-stepper
-         stepper-active?)
+         stepper-active?
+         extract-define-binding)
 
 ;; ── Internal state ──────────────────────────────────────────
 
 (define _stepper-active #f)
 (define _step-count 0)
 (define _stepper-thread #f)
+(define _bindings (make-hash))  ;; name-string → value-string
 
 (define (stepper-active?) _stepper-active)
+
+;; ── Bindings extraction ────────────────────────────────────
+
+;; Check if a string looks like a completed define form: (define <name> <literal>)
+;; Returns (list name-string value-string) or #f.
+;; A "completed" define is one where the body is a literal value (no sub-expressions
+;; remaining to evaluate). We match numbers, strings, booleans, symbols, and '().
+(define (extract-define-binding str)
+  (define m (regexp-match #rx"^\\(define ([^ )]+) (.+)\\)$" str))
+  (and m
+       (let ([val (caddr m)])
+         ;; Only record if the value looks like a literal (not a compound expression)
+         ;; Literals: numbers, booleans, quoted values, strings, '(), void
+         (and (or (regexp-match? #rx"^-?[0-9]" val)          ;; number
+                  (regexp-match? #rx"^#t$|^#f$" val)         ;; boolean
+                  (regexp-match? #rx"^\"" val)                ;; string
+                  (regexp-match? #rx"^'\\(" val)              ;; quoted list
+                  (regexp-match? #rx"^'[^ ]" val)             ;; quoted symbol
+                  (equal? val "'()")                           ;; empty list
+                  (equal? val "(void)")                        ;; void
+                  (equal? val "void"))                         ;; void
+              (list (cadr m) val)))))
+
+;; Convert the _bindings hash to a JSON-friendly list of {name, value} hashes
+(define (bindings->list bindings)
+  (for/list ([(name val) (in-hash bindings)])
+    (hasheq 'name name 'value val)))
+
+;; Scan post-exps strings for completed define forms and update _bindings
+(define (update-bindings-from-post-exps! post-strs)
+  (for ([s (in-list post-strs)])
+    (define result (extract-define-binding s))
+    (when result
+      (hash-set! _bindings (car result) (cadr result)))))
 
 ;; ── Stop stepper ────────────────────────────────────────────
 
@@ -41,6 +78,7 @@
     (set! _stepper-thread #f))
   (set! _stepper-active #f)
   (set! _step-count 0)
+  (hash-clear! _bindings)
   (cell-set! 'stepper-active #f)
   (cell-set! 'stepper-step 0)
   (cell-set! 'stepper-total -1)
@@ -65,6 +103,7 @@
 
   (set! _stepper-active #t)
   (set! _step-count 0)
+  (hash-clear! _bindings)
   (cell-set! 'stepper-active #t)
   (cell-set! 'stepper-step 0)
   (cell-set! 'stepper-total -1)
@@ -107,6 +146,11 @@
 
                   (define pre-src (Before-After-Result-pre-src r))
                   (define post-src (Before-After-Result-post-src r))
+                  (define post-strs (sstx-list->strings
+                                     (Before-After-Result-post-exps r)))
+
+                  ;; Update running bindings from any completed defines
+                  (update-bindings-from-post-exps! post-strs)
 
                   (send-message!
                    (make-message "stepper:step"
@@ -115,10 +159,10 @@
                                 (hasheq 'type "before-after"
                                         'before (sstx-list->strings
                                                  (Before-After-Result-pre-exps r))
-                                        'after (sstx-list->strings
-                                                (Before-After-Result-post-exps r))
+                                        'after post-strs
                                         'kind (symbol->string
                                                (Before-After-Result-kind r))
+                                        'bindings (bindings->list _bindings)
                                         'pre_src (if pre-src
                                                      (hasheq 'position (Posn-Info-posn pre-src)
                                                              'span (Posn-Info-span pre-src))
