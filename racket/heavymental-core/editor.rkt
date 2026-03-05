@@ -2,6 +2,7 @@
 
 (require racket/list
          racket/match
+         racket/set
          racket/string
          "protocol.rkt"
          "cell.rkt")
@@ -15,7 +16,12 @@
          current-file-dirty?
          path->filename
          detect-language
-         detect-lang-from-content)
+         detect-lang-from-content
+         mark-file-dirty!
+         mark-file-clean!
+         file-dirty?
+         any-dirty-files?
+         reset-dirty-state!)
 
 ;; ── Accessors for cell state ─────────────────────────────────
 ;; These read from cells defined in main.rkt via cell-ref.
@@ -70,6 +76,32 @@
     [(string=? lang-id "plaintext") "Plain Text"]
     [else lang-id]))
 
+;; ── Dirty file tracking ─────────────────────────────────────
+;; Mutable set of file paths with unsaved changes.
+;; The dirty-files cell is maintained as a JSON-friendly list.
+(define dirty-set (mutable-set))
+
+(define (mark-file-dirty! path)
+  (set-add! dirty-set path)
+  (sync-dirty-cell!))
+
+(define (mark-file-clean! path)
+  (set-remove! dirty-set path)
+  (sync-dirty-cell!))
+
+(define (file-dirty? path)
+  (set-member? dirty-set path))
+
+(define (any-dirty-files?)
+  (positive? (set-count dirty-set)))
+
+(define (reset-dirty-state!)
+  (set-clear! dirty-set)
+  (sync-dirty-cell!))
+
+(define (sync-dirty-cell!)
+  (cell-set! 'dirty-files (set->list dirty-set)))
+
 ;; ── File operations ──────────────────────────────────────────
 
 ;; Send a request to Rust to show the native open-file dialog.
@@ -113,6 +145,8 @@
   (match name
     ["editor:dirty"
      ;; Frontend reports the buffer is dirty
+     (define path (message-ref msg 'path (current-file-path)))
+     (mark-file-dirty! path)
      (cell-set! 'file-dirty #t)
      ;; Update title to show dirty indicator
      (define filename (path->filename (current-file-path)))
@@ -159,6 +193,7 @@
      (define path (message-ref msg 'path ""))
      (cell-set! 'current-file path)
      (cell-set! 'file-dirty #f)
+     (mark-file-clean! path)
      (define filename (path->filename path))
      (cell-set! 'title (format "HeavyMental — ~a" filename))
      (cell-set! 'status (format "Saved ~a" filename))]

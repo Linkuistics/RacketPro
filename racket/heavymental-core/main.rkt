@@ -14,6 +14,7 @@
 (define-cell status "Ready")
 (define-cell language "")
 (define-cell cursor-pos "")
+(define-cell dirty-files (list))
 (define-cell project-root "")
 
 ;; ── Layout ─────────────────────────────────────────────────
