@@ -5,7 +5,8 @@
          "cell.rkt"
          "editor.rkt"
          "repl.rkt"
-         "lang-intel.rkt")
+         "lang-intel.rkt"
+         "stepper.rkt")
 
 ;; ── Cells ──────────────────────────────────────────────────
 (define-cell current-file "")
@@ -17,6 +18,9 @@
 (define-cell dirty-files (list))
 (define-cell repl-running #f)
 (define-cell project-root "")
+(define-cell stepper-active #f)
+(define-cell stepper-step 0)
+(define-cell stepper-total -1)
 
 ;; ── Layout ─────────────────────────────────────────────────
 ;; Zed-like layout:
@@ -118,7 +122,10 @@
    (hasheq 'label "Racket"
            'children
            (list
-            (hasheq 'label "Run" 'shortcut "Cmd+R" 'action "run")))))
+            (hasheq 'label "Run" 'shortcut "Cmd+R" 'action "run")
+            (hasheq 'label "---")
+            (hasheq 'label "Step Through" 'shortcut "Cmd+Shift+R" 'action "step-through")
+            (hasheq 'label "Stop Stepper" 'action "stop-stepper")))))
 
 ;; ── Event handler ──────────────────────────────────────────
 (define (handle-event msg)
@@ -192,6 +199,13 @@
     ;; Completion request
     [(string=? event-name "intel:completion-request")
      (handle-completion-request msg)]
+    ;; Stepper events
+    [(string=? event-name "stepper:start")
+     (define path (message-ref msg 'path (current-file-path)))
+     (when (and path (not (string=? path "")) (not (string=? path "untitled.rkt")))
+       (start-stepper path))]
+    [(string=? event-name "stepper:stop")
+     (stop-stepper)]
     [else
      (eprintf "Unknown event: ~a\n" event-name)]))
 
@@ -206,6 +220,12 @@
      ;; Ask frontend to trigger a save (Monaco owns the buffer content)
      (send-message! (make-message "editor:request-save"))]
     [(string=? action "run") (handle-run)]
+    [(string=? action "step-through")
+     (define path (current-file-path))
+     (when (and path (not (string=? path "")) (not (string=? path "untitled.rkt")))
+       (start-stepper path))]
+    [(string=? action "stop-stepper")
+     (stop-stepper)]
     [else
      (eprintf "Unhandled menu action: ~a\n" action)]))
 

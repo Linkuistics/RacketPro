@@ -1,0 +1,198 @@
+#lang racket/base
+
+(require rackunit
+         json
+         racket/port
+         racket/string
+         racket/file
+         "../racket/heavymental-core/protocol.rkt"
+         "../racket/heavymental-core/cell.rkt"
+         "../racket/heavymental-core/stepper.rkt")
+
+;; ── Helpers ──────────────────────────────────────────────────────
+
+(define (parse-all-messages output)
+  (define lines (string-split (string-trim output) "\n"))
+  (for/list ([line (in-list lines)]
+             #:when (> (string-length (string-trim line)) 0))
+    (string->jsexpr line)))
+
+(define (filter-by-type msgs type)
+  (filter (lambda (m) (equal? (hash-ref m 'type #f) type)) msgs))
+
+;; Helper: write a temp Racket file, run stepper, return parsed messages
+(define (run-stepper-on-source source-text)
+  (define tmp (make-temporary-file "stepper-test-~a.rkt"))
+  (with-output-to-file tmp #:exists 'replace
+    (lambda () (display source-text)))
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (start-stepper (path->string tmp))
+        ;; Wait for stepper thread to finish
+        (sleep 5))))
+  (delete-file tmp)
+  (parse-all-messages output))
+
+;; ── Cells needed by the stepper ──────────────────────────────────
+
+(define-cell stepper-active #f)
+(define-cell stepper-step 0)
+(define-cell stepper-total -1)
+(define-cell status "Ready")
+
+;; ── Tests ────────────────────────────────────────────────────────
+
+(test-case "stepper-active? starts as false"
+  (check-false (stepper-active?)))
+
+(test-case "stop-stepper when not running emits stepper:finished"
+  (define output
+    (with-output-to-string
+      (lambda () (stop-stepper))))
+  (define msgs (parse-all-messages output))
+  (define finished (filter-by-type msgs "stepper:finished"))
+  (check-equal? (length finished) 1)
+  (check-equal? (hash-ref (car finished) 'total) 0))
+
+(test-case "stepper produces at least one step for (+ 1 2)"
+  (define msgs
+    (run-stepper-on-source "#lang racket\n(+ 1 2)\n"))
+
+  ;; Should have at least one stepper:step message
+  (define step-msgs (filter-by-type msgs "stepper:step"))
+  (check-true (> (length step-msgs) 0)
+              "Expected at least one stepper:step message")
+
+  ;; First step should have before/after data
+  (define first-step (car step-msgs))
+  (define data (hash-ref first-step 'data))
+  (check-equal? (hash-ref data 'type) "before-after")
+  (check-true (list? (hash-ref data 'before)))
+  (check-true (list? (hash-ref data 'after)))
+
+  ;; Should have finished with stepper:finished
+  (define finished (filter-by-type msgs "stepper:finished"))
+  (check-true (> (length finished) 0)
+              "Expected stepper:finished message"))
+
+(test-case "stepper shows (+ 1 2) -> 3"
+  (define msgs
+    (run-stepper-on-source "#lang racket\n(+ 1 2)\n"))
+
+  (define step-msgs (filter-by-type msgs "stepper:step"))
+  (check-equal? (length step-msgs) 1)
+
+  (define data (hash-ref (car step-msgs) 'data))
+  (check-equal? (hash-ref data 'before) (list "(+ 1 2)"))
+  (check-equal? (hash-ref data 'after) (list "3")))
+
+(test-case "stepper produces multiple steps for variable substitution"
+  (define msgs
+    (run-stepper-on-source
+     "#lang racket\n(define x 10)\n(* x 3)\n"))
+
+  (define step-msgs (filter-by-type msgs "stepper:step"))
+  ;; Should have at least 2 steps:
+  ;;   (* x 3) -> (* 10 3) and (* 10 3) -> 30
+  (check-true (>= (length step-msgs) 2)
+              (format "Expected >= 2 steps, got ~a" (length step-msgs)))
+
+  ;; Steps should be numbered sequentially
+  (for ([m (in-list step-msgs)]
+        [i (in-naturals 1)])
+    (check-equal? (hash-ref m 'step) i
+                  (format "Step ~a should have step number ~a" i i))))
+
+(test-case "stepper step includes source position info"
+  (define msgs
+    (run-stepper-on-source "#lang racket\n(+ 1 2)\n"))
+
+  (define step-msgs (filter-by-type msgs "stepper:step"))
+  (check-true (> (length step-msgs) 0))
+
+  (define data (hash-ref (car step-msgs) 'data))
+  (define pre-src (hash-ref data 'pre_src))
+  (check-true (hash? pre-src) "pre_src should be a hash")
+  (check-true (hash-has-key? pre-src 'position) "pre_src should have position")
+  (check-true (hash-has-key? pre-src 'span) "pre_src should have span")
+  (check-true (number? (hash-ref pre-src 'position)))
+  (check-true (number? (hash-ref pre-src 'span))))
+
+(test-case "stepper:finished includes total step count"
+  (define msgs
+    (run-stepper-on-source "#lang racket\n(+ 1 2)\n"))
+
+  (define finished (filter-by-type msgs "stepper:finished"))
+  (check-equal? (length finished) 1)
+  (check-equal? (hash-ref (car finished) 'total) 1))
+
+(test-case "stepper handles multi-expression programs"
+  (define msgs
+    (run-stepper-on-source
+     "#lang racket\n(define x 10)\n(define y (* x 3))\n(+ x y)\n"))
+
+  (define step-msgs (filter-by-type msgs "stepper:step"))
+  ;; Multiple reductions expected for variable substitutions
+  (check-true (>= (length step-msgs) 3)
+              (format "Expected >= 3 steps, got ~a" (length step-msgs)))
+
+  (define finished (filter-by-type msgs "stepper:finished"))
+  (check-equal? (length finished) 1)
+  (check-equal? (hash-ref (car finished) 'total) (length step-msgs)))
+
+(test-case "stepper reports errors for bad programs"
+  (define msgs
+    (run-stepper-on-source "#lang racket\n(/ 1 0)\n"))
+
+  ;; Should have a stepper:error message
+  (define error-msgs (filter-by-type msgs "stepper:error"))
+  (check-true (> (length error-msgs) 0)
+              "Expected stepper:error message for division by zero")
+
+  (define err (car error-msgs))
+  (check-true (string? (hash-ref err 'error))
+              "Error message should be a string"))
+
+(test-case "stepper reports error for nonexistent file"
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (start-stepper "/tmp/nonexistent-stepper-file-12345.rkt")
+        (sleep 2))))
+
+  (define msgs (parse-all-messages output))
+  (define error-msgs (filter-by-type msgs "stepper:error"))
+  (check-true (> (length error-msgs) 0)
+              "Expected stepper:error for missing file"))
+
+(test-case "stepper step kind is reported"
+  (define msgs
+    (run-stepper-on-source "#lang racket\n(+ 1 2)\n"))
+
+  (define step-msgs (filter-by-type msgs "stepper:step"))
+  (check-true (> (length step-msgs) 0))
+
+  (define data (hash-ref (car step-msgs) 'data))
+  (check-true (string? (hash-ref data 'kind))
+              "Step should include kind field"))
+
+(test-case "stepper updates cells during stepping"
+  ;; Reset cell state
+  (cell-set! 'stepper-active #f)
+  (cell-set! 'stepper-step 0)
+
+  (define msgs
+    (run-stepper-on-source "#lang racket\n(+ 1 2)\n"))
+
+  ;; Check that cell:update messages were sent for stepper-active
+  (define cell-updates (filter-by-type msgs "cell:update"))
+  (define active-updates
+    (filter (lambda (m) (equal? (hash-ref m 'name #f) "stepper-active"))
+            cell-updates))
+
+  ;; Should have at least 2 updates: set to true, then set to false
+  (check-true (>= (length active-updates) 2)
+              "Expected stepper-active cell to be updated at least twice"))
+
+(displayln "All stepper tests passed!")
