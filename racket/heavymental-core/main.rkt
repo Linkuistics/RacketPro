@@ -272,7 +272,23 @@
          (run-file path))
        (when (pending-close? path)
          (clear-pending-close! path)
-         (send-message! (make-message "tab:close" 'path path))))]
+         (send-message! (make-message "tab:close" 'path path)))
+       (when (pending-quit?)
+         (clear-pending-quit!)
+         (send-message! (make-message "lifecycle:quit"))))]
+    ;; Lifecycle: window close request — check for unsaved changes
+    [(string=? typ "lifecycle:close-request")
+     (cond
+       [(any-dirty-files?)
+        (send-message! (make-message "dialog:confirm"
+                                     'id "lifecycle:quit"
+                                     'title "Unsaved Changes"
+                                     'message "You have unsaved changes. Save before quitting?"
+                                     'save_label "Save All"
+                                     'dont_save_label "Don\u2019t Save"
+                                     'cancel_label "Cancel"))]
+       [else
+        (send-message! (make-message "lifecycle:quit"))])]
     ;; Dialog results (e.g., save-before-close confirmation)
     [(string=? typ "dialog:confirm:result")
      (handle-dialog-result msg)]

@@ -312,4 +312,215 @@
   ;; Simulate handle-run guard: should not set pending-run or do anything
   (check-false (pending-run?)))
 
+;; ═══════════════════════════════════════════════════════════════════════════
+;; Test: lifecycle:close-request (quit with unsaved changes)
+;; ═══════════════════════════════════════════════════════════════════════════
+
+(test-case "pending-quit? is initially false"
+  (clear-pending-quit!)
+  (check-false (pending-quit?)))
+
+(test-case "set-pending-quit! sets pending-quit to true"
+  (clear-pending-quit!)
+  (set-pending-quit!)
+  (check-true (pending-quit?)))
+
+(test-case "clear-pending-quit! resets pending-quit to false"
+  (set-pending-quit!)
+  (check-true (pending-quit?))
+  (clear-pending-quit!)
+  (check-false (pending-quit?)))
+
+(test-case "lifecycle:close-request with no dirty files sends lifecycle:quit"
+  ;; When there are no unsaved changes, close-request should immediately quit.
+  (reset-cells!)
+  (clear-pending-quit!)
+  (check-false (any-dirty-files?))
+  ;; Simulate the dispatch logic from main.rkt for lifecycle:close-request
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (cond
+          [(any-dirty-files?)
+           (send-message! (make-message "dialog:confirm"
+                                        'id "lifecycle:quit"
+                                        'title "Unsaved Changes"
+                                        'message "You have unsaved changes. Save before quitting?"
+                                        'save_label "Save All"
+                                        'dont_save_label "Don\u2019t Save"
+                                        'cancel_label "Cancel"))]
+          [else
+           (send-message! (make-message "lifecycle:quit"))]))))
+  (define msgs (parse-all-messages output))
+  ;; Should send lifecycle:quit directly
+  (check-true
+   (ormap (lambda (m)
+            (equal? (hash-ref m 'type #f) "lifecycle:quit"))
+          msgs))
+  ;; Should NOT send dialog:confirm
+  (check-false
+   (ormap (lambda (m)
+            (equal? (hash-ref m 'type #f) "dialog:confirm"))
+          msgs)))
+
+(test-case "lifecycle:close-request with dirty files sends dialog:confirm"
+  ;; When there are unsaved changes, close-request should show a dialog.
+  (reset-cells!)
+  (clear-pending-quit!)
+  (with-output-to-string
+    (lambda ()
+      (mark-file-dirty! "/tmp/dirty.rkt")))
+  (check-true (any-dirty-files?))
+  ;; Simulate the dispatch logic
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (cond
+          [(any-dirty-files?)
+           (send-message! (make-message "dialog:confirm"
+                                        'id "lifecycle:quit"
+                                        'title "Unsaved Changes"
+                                        'message "You have unsaved changes. Save before quitting?"
+                                        'save_label "Save All"
+                                        'dont_save_label "Don\u2019t Save"
+                                        'cancel_label "Cancel"))]
+          [else
+           (send-message! (make-message "lifecycle:quit"))]))))
+  (define msgs (parse-all-messages output))
+  ;; Should send dialog:confirm
+  (check-true
+   (ormap (lambda (m)
+            (and (equal? (hash-ref m 'type #f) "dialog:confirm")
+                 (equal? (hash-ref m 'id #f) "lifecycle:quit")))
+          msgs))
+  ;; Should NOT send lifecycle:quit
+  (check-false
+   (ormap (lambda (m)
+            (equal? (hash-ref m 'type #f) "lifecycle:quit"))
+          msgs)))
+
+(test-case "dialog:confirm:result dont-save for lifecycle:quit sends lifecycle:quit"
+  (reset-cells!)
+  (clear-pending-quit!)
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (handle-dialog-result
+         (make-message "dialog:confirm:result"
+                       'id "lifecycle:quit"
+                       'choice "dont-save")))))
+  (define msgs (parse-all-messages output))
+  ;; Should send lifecycle:quit
+  (check-true
+   (ormap (lambda (m)
+            (equal? (hash-ref m 'type #f) "lifecycle:quit"))
+          msgs))
+  ;; pending-quit should NOT be set
+  (check-false (pending-quit?)))
+
+(test-case "dialog:confirm:result save for lifecycle:quit sends editor:request-save and sets pending-quit"
+  (reset-cells!)
+  (clear-pending-quit!)
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (handle-dialog-result
+         (make-message "dialog:confirm:result"
+                       'id "lifecycle:quit"
+                       'choice "save")))))
+  (define msgs (parse-all-messages output))
+  ;; Should send editor:request-save
+  (check-true
+   (ormap (lambda (m)
+            (equal? (hash-ref m 'type #f) "editor:request-save"))
+          msgs))
+  ;; Should NOT send lifecycle:quit yet
+  (check-false
+   (ormap (lambda (m)
+            (equal? (hash-ref m 'type #f) "lifecycle:quit"))
+          msgs))
+  ;; pending-quit should be set
+  (check-true (pending-quit?)))
+
+(test-case "dialog:confirm:result cancel for lifecycle:quit does nothing"
+  (reset-cells!)
+  (clear-pending-quit!)
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (handle-dialog-result
+         (make-message "dialog:confirm:result"
+                       'id "lifecycle:quit"
+                       'choice "cancel")))))
+  (define msgs (parse-all-messages output))
+  ;; Should NOT send lifecycle:quit
+  (check-false
+   (ormap (lambda (m)
+            (equal? (hash-ref m 'type #f) "lifecycle:quit"))
+          msgs))
+  ;; Should NOT send editor:request-save
+  (check-false
+   (ormap (lambda (m)
+            (equal? (hash-ref m 'type #f) "editor:request-save"))
+          msgs))
+  ;; pending-quit should NOT be set
+  (check-false (pending-quit?)))
+
+(test-case "pending-quit: file:write:result triggers lifecycle:quit"
+  ;; After save completes with pending-quit, lifecycle:quit should be sent.
+  (reset-cells!)
+  (clear-pending-quit!)
+  (with-output-to-string
+    (lambda ()
+      (cell-set! 'current-file "/tmp/test.rkt")
+      (mark-file-dirty! "/tmp/test.rkt")))
+  ;; Set pending-quit (simulating what handle-dialog-result does)
+  (set-pending-quit!)
+  (check-true (pending-quit?))
+  ;; Simulate file:write:result arriving
+  (with-output-to-string
+    (lambda ()
+      (handle-file-result
+       (make-message "file:write:result" 'path "/tmp/test.rkt"))))
+  ;; Simulate the post-write check from main.rkt dispatch
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (when (pending-quit?)
+          (clear-pending-quit!)
+          (send-message! (make-message "lifecycle:quit"))))))
+  (define msgs (parse-all-messages output))
+  ;; Should send lifecycle:quit
+  (check-true
+   (ormap (lambda (m)
+            (equal? (hash-ref m 'type #f) "lifecycle:quit"))
+          msgs))
+  ;; pending-quit should be cleared
+  (check-false (pending-quit?)))
+
+(test-case "pending-quit: not triggered when not set"
+  ;; file:write:result without pending-quit should not send lifecycle:quit
+  (reset-cells!)
+  (clear-pending-quit!)
+  (with-output-to-string
+    (lambda ()
+      (cell-set! 'current-file "/tmp/test.rkt")
+      (mark-file-dirty! "/tmp/test.rkt")))
+  (check-false (pending-quit?))
+  ;; Simulate file:write:result arriving
+  (with-output-to-string
+    (lambda ()
+      (handle-file-result
+       (make-message "file:write:result" 'path "/tmp/test.rkt"))))
+  ;; Simulate the post-write check from main.rkt dispatch
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (when (pending-quit?)
+          (clear-pending-quit!)
+          (send-message! (make-message "lifecycle:quit"))))))
+  (define msgs (parse-all-messages output))
+  ;; Should NOT send lifecycle:quit
+  (check-equal? msgs '()))
+
 (displayln "All Phase 4 tests passed!")

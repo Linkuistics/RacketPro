@@ -80,6 +80,27 @@ pub fn run() {
     }
 
     builder
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Prevent default close — let Racket decide
+                api.prevent_close();
+                // Send lifecycle:close-request to Racket
+                let state = window.state::<AppState>();
+                if let Some(bridge) = state.bridge.as_ref() {
+                    let msg = serde_json::json!({
+                        "type": "lifecycle:close-request",
+                    });
+                    if let Err(e) = bridge.send(msg) {
+                        log::error!("Failed to send lifecycle:close-request: {e}");
+                        // If we can't reach Racket, just close
+                        window.destroy().ok();
+                    }
+                } else {
+                    // No bridge running, just close
+                    window.destroy().ok();
+                }
+            }
+        })
         .setup(|app| {
             // Resolve the Racket script path.
             // Use CARGO_MANIFEST_DIR (src-tauri/) at compile time to find the

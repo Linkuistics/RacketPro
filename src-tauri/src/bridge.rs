@@ -532,6 +532,18 @@ fn handle_intercepted_message(
             true
         }
 
+        // ----- Lifecycle ------------------------------------------------
+        "lifecycle:quit" => {
+            let app_caller = app.clone();
+            let app_inner = app.clone();
+            let _ = app_caller.run_on_main_thread(move || {
+                if let Some(window) = app_inner.get_webview_window("main") {
+                    window.destroy().ok();
+                }
+            });
+            true
+        }
+
         // ----- JS Eval (Racket → WebView → Racket) --------------------------
         "eval:exec" => {
             let id = msg

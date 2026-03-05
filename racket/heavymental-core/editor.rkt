@@ -29,7 +29,10 @@
          clear-pending-close!
          pending-run?
          set-pending-run!
-         clear-pending-run!)
+         clear-pending-run!
+         pending-quit?
+         set-pending-quit!
+         clear-pending-quit!)
 
 ;; ── Accessors for cell state ─────────────────────────────────
 ;; These read from cells defined in main.rkt via cell-ref.
@@ -126,6 +129,16 @@
 (define (set-pending-run!) (set! _pending-run #t))
 (define (clear-pending-run!) (set! _pending-run #f))
 
+;; ── Pending quit state ───────────────────────────────────────────────
+;; When the user chooses "Save" in the quit-confirmation dialog, we save
+;; the current file and set pending-quit so that the file:write:result
+;; handler can send lifecycle:quit after the save completes.
+(define _pending-quit #f)
+
+(define (pending-quit?) _pending-quit)
+(define (set-pending-quit!) (set! _pending-quit #t))
+(define (clear-pending-quit!) (set! _pending-quit #f))
+
 ;; ── Tab close with dirty check ─────────────────────────────────
 
 (define (handle-tab-close-request path)
@@ -146,6 +159,14 @@
   (define id (message-ref msg 'id ""))
   (define choice (message-ref msg 'choice "cancel"))
   (cond
+    [(string=? id "lifecycle:quit")
+     (cond
+       [(string=? choice "save")
+        (send-message! (make-message "editor:request-save"))
+        (set-pending-quit!)]
+       [(string=? choice "dont-save")
+        (send-message! (make-message "lifecycle:quit"))]
+       [else (void)])]  ;; cancel — do nothing (window stays open)
     [(string-prefix? id "close:")
      (define path (substring id 6))
      (cond
