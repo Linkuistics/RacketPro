@@ -26,7 +26,7 @@ export const TAURI_MOCK_SCRIPT = `
         if (cmd === 'send_to_racket') return;
         if (cmd === 'debug_log') return;
         if (cmd === 'debug_write') return;
-        if (cmd === 'list_dir') return { entries: [] };
+        if (cmd === 'list_dir') return [];
         return null;
       },
     },

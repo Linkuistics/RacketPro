@@ -58,14 +58,20 @@ class HmStepperToolbar extends LitElement {
   constructor() {
     super();
     this._disposeEffect = null;
+    this._disposeStepEffect = null;
     this._unsubs = [];
   }
 
   firstUpdated() {
     setTimeout(() => {
       const activeCell = getCell('stepper-active');
+      const stepCell = getCell('stepper-step');
       this._disposeEffect = effect(() => {
         this.toggleAttribute('hidden', !activeCell.value);
+      });
+      this._disposeStepEffect = effect(() => {
+        const el = this.shadowRoot?.getElementById('step-num');
+        if (el) el.textContent = String(stepCell.value);
       });
     }, 0);
   }
@@ -73,14 +79,14 @@ class HmStepperToolbar extends LitElement {
   disconnectedCallback() {
     super.disconnectedCallback();
     if (this._disposeEffect) this._disposeEffect();
+    if (this._disposeStepEffect) this._disposeStepEffect();
     for (const u of this._unsubs) u();
   }
 
   render() {
+    // NOTE: The stepper currently runs to completion — interactive
+    // forward/back stepping requires step-at-a-time execution (future work).
     return html`
-      <button @click=${() => dispatch('stepper:forward')}>Step \u2192</button>
-      <button @click=${() => dispatch('stepper:back')}>\u2190 Back</button>
-      <button @click=${() => dispatch('stepper:continue')}>Continue</button>
       <button @click=${() => dispatch('stepper:stop')}>Stop</button>
       <span class="step-info">Step <span id="step-num">0</span></span>
     `;
