@@ -118,6 +118,8 @@ class HmEditor extends LitElement {
     this._saveDisposable = null;
     this._disposeVisibility = null;
     this._arrowOverlay = null;
+    /** @type {string[]} Monaco decoration IDs for stepper highlighting. */
+    this._stepperDecorations = [];
   }
 
   render() {
@@ -189,6 +191,13 @@ class HmEditor extends LitElement {
       .hm-cs-unused-require { opacity: 0.5 !important; text-decoration: line-through !important; }
     `;
     this.shadowRoot.appendChild(csStyle);
+
+    // Stepper expression highlight style
+    const stepperStyle = document.createElement('style');
+    stepperStyle.textContent = `
+      .hm-stepper-highlight { background: rgba(255, 235, 59, 0.3) !important; }
+    `;
+    this.shadowRoot.appendChild(stepperStyle);
 
     // Track changes for dirty state + debounced document:changed
     this._changeDisposable = this._editor.onDidChangeModelContent((e) => {
@@ -308,6 +317,49 @@ class HmEditor extends LitElement {
             path: this.filePath,
             content,
           });
+        }
+      })
+    );
+
+    // Stepper expression highlighting
+    this._unsubs.push(
+      onMessage('stepper:step', (msg) => {
+        if (!this._editor || !this._monaco) return;
+        const data = msg.data || {};
+        const src = data.pre_src;
+        if (src && src.position != null && src.span != null) {
+          const model = this._editor.getModel();
+          if (!model) return;
+          const startPos = model.getPositionAt(src.position - 1); // 1-based offset
+          const endPos = model.getPositionAt(src.position - 1 + src.span);
+          this._stepperDecorations = this._editor.deltaDecorations(
+            this._stepperDecorations,
+            [{
+              range: new this._monaco.Range(
+                startPos.lineNumber, startPos.column,
+                endPos.lineNumber, endPos.column
+              ),
+              options: {
+                className: 'hm-stepper-highlight',
+                isWholeLine: false,
+              },
+            }]
+          );
+          this._editor.revealRangeInCenter(new this._monaco.Range(
+            startPos.lineNumber, startPos.column,
+            endPos.lineNumber, endPos.column
+          ));
+        }
+      })
+    );
+
+    // Clear stepper decorations when stepper stops
+    this._unsubs.push(
+      onMessage('stepper:finished', () => {
+        if (this._editor) {
+          this._stepperDecorations = this._editor.deltaDecorations(
+            this._stepperDecorations, []
+          );
         }
       })
     );

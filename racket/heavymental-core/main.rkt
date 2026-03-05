@@ -91,6 +91,12 @@
                                                        'children (list))
                                                (hasheq 'type "error-panel"
                                                        'props (hasheq)
+                                                       'children (list))
+                                               (hasheq 'type "stepper-toolbar"
+                                                       'props (hasheq)
+                                                       'children (list))
+                                               (hasheq 'type "bindings-panel"
+                                                       'props (hasheq)
                                                        'children (list))))))))))
            ;; ── Status bar ──
            (hasheq 'type "statusbar"

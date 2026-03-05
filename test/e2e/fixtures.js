@@ -84,6 +84,9 @@ export const CELLS = [
   { name: 'project-root', value: '/tmp/test-project' },
   { name: 'dirty-files', value: [] },
   { name: 'repl-running', value: false },
+  { name: 'stepper-active', value: false },
+  { name: 'stepper-step', value: 0 },
+  { name: 'stepper-total', value: -1 },
 ];
 
 export const LAYOUT = {
@@ -126,6 +129,8 @@ export const LAYOUT = {
                     { type: 'terminal', props: { 'pty-id': 'repl' }, children: [] },
                     { type: 'panel-header', props: { label: 'PROBLEMS' }, children: [] },
                     { type: 'error-panel', props: {}, children: [] },
+                    { type: 'stepper-toolbar', props: {}, children: [] },
+                    { type: 'bindings-panel', props: {}, children: [] },
                   ],
                 },
               ],
