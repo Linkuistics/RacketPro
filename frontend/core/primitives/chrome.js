@@ -194,6 +194,14 @@ class HmBreadcrumb extends LitElement {
               </svg>
             </span>`
           : ''}
+        ${!isStepping && !isRunning
+          ? html`<span class="action-btn expand" title="Expand Macros (Cmd+Shift+E)" @click=${() => dispatch('macro:expand', { path: filePath })}>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <path d="M2 4h12M2 8h8M2 12h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <circle cx="13" cy="10" r="2.5" stroke="currentColor" stroke-width="1.2" fill="none"/>
+              </svg>
+            </span>`
+          : ''}
       </div>
     `;
   }
