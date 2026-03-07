@@ -24,7 +24,10 @@
          list-extensions
          get-extension-handler
          get-extension-layout-contributions
-         assign-layout-ids)
+         assign-layout-ids
+         watch-directory!
+         unwatch-all!
+         handle-fs-change)
 
 ;; ── Descriptor struct ────────────────────────────────────────────────────────
 
@@ -331,3 +334,34 @@
                 'props new-props
                 'children new-children)]
     [else tree]))
+
+;; ── Filesystem watcher API ───────────────────────────────────────────────────
+
+;; Active watcher callbacks: watch-id → callback
+(define fs-watch-callbacks (make-hash))
+(define _next-watch-id 0)
+
+;; Start watching a directory. Callback receives (event-type path-string).
+;; Returns a watch-id string.
+(define (watch-directory! path callback)
+  (set! _next-watch-id (add1 _next-watch-id))
+  (define watch-id (format "watch-~a" _next-watch-id))
+  (hash-set! fs-watch-callbacks watch-id callback)
+  (send-message! (make-message "fs:watch"
+                               'id watch-id
+                               'path path))
+  watch-id)
+
+;; Stop all filesystem watchers
+(define (unwatch-all!)
+  (send-message! (make-message "fs:unwatch-all"))
+  (hash-clear! fs-watch-callbacks))
+
+;; Handle fs:change events from Rust (called by dispatch in main.rkt)
+(define (handle-fs-change msg)
+  (define watch-id (message-ref msg 'watch-id ""))
+  (define event-type (message-ref msg 'event ""))
+  (define path (message-ref msg 'path ""))
+  (define callback (hash-ref fs-watch-callbacks watch-id #f))
+  (when callback
+    (callback event-type path)))

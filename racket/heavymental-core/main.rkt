@@ -503,6 +503,8 @@
          (reload-extension! path)
          (rebuild-layout!)
          (cell-set! 'status (format "Reloaded extension: ~a" path))))]
+    [(string=? typ "fs:change")
+     (handle-fs-change msg)]
     [(string=? typ "ping")
      (send-message! (make-message "pong"))]
     [else

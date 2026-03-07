@@ -305,3 +305,19 @@
   (check-equal? (cell-ref 'calc-test:result) "42")
   (with-output-to-string
     (lambda () (unload-extension! 'calc-test))))
+
+;; ── Test: File watcher lifecycle hooks ───────────────────────────────────────
+
+(test-case "file watcher extension: lifecycle hooks fire"
+  (define activated #f)
+  (define deactivated #f)
+  (define-extension watcher-test
+    #:name "Watcher Test"
+    #:on-activate (lambda () (set! activated #t))
+    #:on-deactivate (lambda () (set! deactivated #t)))
+  (with-output-to-string
+    (lambda () (load-extension-descriptor! watcher-test)))
+  (check-true activated)
+  (with-output-to-string
+    (lambda () (unload-extension! 'watcher-test)))
+  (check-true deactivated))
