@@ -6,7 +6,8 @@
          "editor.rkt"
          "repl.rkt"
          "lang-intel.rkt"
-         "stepper.rkt")
+         "stepper.rkt"
+         "macro-expander.rkt")
 
 ;; ── Cells ──────────────────────────────────────────────────
 (define-cell current-file "")
@@ -22,6 +23,7 @@
 (define-cell stepper-step 0)
 (define-cell stepper-total -1)
 (define-cell current-bottom-tab "terminal")
+(define-cell macro-active #f)
 
 ;; Track which REPL generation was active when the last pty:create ran.
 ;; Used to ignore pty:exit events from stale (killed) REPL processes.
@@ -156,7 +158,9 @@
             (hasheq 'label "Run" 'shortcut "Cmd+R" 'action "run")
             (hasheq 'label "---")
             (hasheq 'label "Step Through" 'shortcut "Cmd+Shift+R" 'action "step-through")
-            (hasheq 'label "Stop Stepper" 'action "stop-stepper")))))
+            (hasheq 'label "Stop Stepper" 'action "stop-stepper")
+            (hasheq 'label "---")
+            (hasheq 'label "Expand Macros" 'shortcut "Cmd+Shift+E" 'action "expand-macros")))))
 
 ;; ── Event handler ──────────────────────────────────────────
 (define (handle-event msg)
@@ -260,6 +264,13 @@
           ;; Open file, then find definition after it loads
           (set-pending-goto! path #:name name)
           (send-message! (make-message "file:read" 'path path))]))]
+    ;; Macro expander events
+    [(string=? event-name "macro:expand")
+     (define path (message-ref msg 'path (current-file-path)))
+     (when (and path (not (string=? path "")) (not (string=? path "untitled.rkt")))
+       (start-macro-expander path))]
+    [(string=? event-name "macro:stop")
+     (stop-macro-expander)]
     ;; Bottom panel tab selection
     [(string=? event-name "bottom-tab:select")
      (define tab (message-ref msg 'tab "terminal"))
@@ -285,6 +296,10 @@
        (cell-set! 'current-bottom-tab "stepper"))]
     [(string=? action "stop-stepper")
      (stop-stepper)]
+    [(string=? action "expand-macros")
+     (define path (current-file-path))
+     (when (and path (not (string=? path "")) (not (string=? path "untitled.rkt")))
+       (start-macro-expander path))]
     [else
      (eprintf "Unhandled menu action: ~a\n" action)]))
 
