@@ -34,11 +34,24 @@
     [(head . _) (identifier? #'head) (symbol->string (syntax-e #'head))]
     [_ #f]))
 
-;; Check if two syntax objects are identical (no expansion happened)
+;; Check if two syntax objects are identical (no expansion happened).
+;; Also treats (quote X) as unchanged if X equals the original datum,
+;; since expand-once turns literals like #t into '#t.
 (define (syntax-unchanged? before after)
-  (equal? (syntax->datum before) (syntax->datum after)))
+  (define bd (syntax->datum before))
+  (define ad (syntax->datum after))
+  (or (equal? bd ad)
+      ;; (quote X) where X = original datum is just literal quotation, not a real macro step
+      (and (pair? ad)
+           (eq? (car ad) 'quote)
+           (pair? (cdr ad))
+           (null? (cddr ad))
+           (equal? bd (cadr ad)))))
 
 ;; ── Expansion tree builder ────────────────────────────────
+
+;; Maximum recursion depth for expansion tracing
+(define MAX-EXPANSION-DEPTH 50)
 
 ;; expand-and-trace: recursively expand a syntax object,
 ;; building a tree of macro applications.
@@ -49,50 +62,59 @@
 ;;   'before   — string of form before expansion
 ;;   'after    — string of form after expansion (or #f if leaf)
 ;;   'children — list of child nodes
-(define (expand-and-trace stx ns)
+(define (expand-and-trace stx ns [depth 0])
   (define id (next-node-id!))
   (define before-str (syntax->string stx))
 
-  ;; Try expand-once
-  (define expanded
-    (with-handlers ([exn:fail? (lambda (e) stx)])
-      (parameterize ([current-namespace ns])
-        (expand-once stx))))
-
+  ;; Bail out if we've recursed too deep
   (cond
-    ;; No expansion happened — leaf node
-    [(syntax-unchanged? stx expanded)
+    [(>= depth MAX-EXPANSION-DEPTH)
      (hasheq 'id id
              'macro #f
              'before before-str
              'after #f
              'children (list))]
-
-    ;; Expansion happened — record it and recurse
     [else
-     (define macro-name (or (syntax-head stx) "???"))
-     (define after-str (syntax->string expanded))
+     ;; Try expand-once
+     (define expanded
+       (with-handlers ([exn:fail? (lambda (e) stx)])
+         (parameterize ([current-namespace ns])
+           (expand-once stx))))
 
-     ;; Recursively trace the sub-expressions of the expanded form
-     (define children
-       (syntax-case expanded ()
-         [(parts ...)
-          (for/list ([part (in-list (syntax->list #'(parts ...)))])
-            (expand-and-trace part ns))]
-         [_ (list)]))
+     (cond
+       ;; No expansion happened — leaf node
+       [(syntax-unchanged? stx expanded)
+        (hasheq 'id id
+                'macro #f
+                'before before-str
+                'after #f
+                'children (list))]
 
-     ;; Filter out leaf children with no macro application
-     ;; (keep the tree focused on actual macro steps)
-     (define interesting-children
-       (filter (lambda (c) (or (hash-ref c 'macro #f)
-                               (not (null? (hash-ref c 'children '())))))
-               children))
+       ;; Expansion happened — record it and recurse
+       [else
+        (define macro-name (or (syntax-head stx) "???"))
+        (define after-str (syntax->string expanded))
 
-     (hasheq 'id id
-             'macro macro-name
-             'before before-str
-             'after after-str
-             'children interesting-children)]))
+        ;; Recursively trace the sub-expressions of the expanded form
+        (define children
+          (syntax-case expanded ()
+            [(parts ...)
+             (for/list ([part (in-list (syntax->list #'(parts ...)))])
+               (expand-and-trace part ns (add1 depth)))]
+            [_ (list)]))
+
+        ;; Filter out leaf children with no macro application
+        ;; (keep the tree focused on actual macro steps)
+        (define interesting-children
+          (filter (lambda (c) (or (hash-ref c 'macro #f)
+                                  (not (null? (hash-ref c 'children '())))))
+                  children))
+
+        (hasheq 'id id
+                'macro macro-name
+                'before before-str
+                'after after-str
+                'children interesting-children)])]))
 
 ;; ── Public API ────────────────────────────────────────────
 
@@ -110,6 +132,11 @@
     (define text (file->string path))
     (define port (open-input-string text))
     (port-count-lines! port)
+
+    ;; Consume #lang line if present — read-language handles #lang
+    ;; and returns a reader function; we just need it to advance the port
+    (with-handlers ([exn:fail? (lambda (e) (void))])
+      (read-language port (lambda () #f)))
 
     ;; Set up namespace for expansion
     (define ns (make-base-namespace))
