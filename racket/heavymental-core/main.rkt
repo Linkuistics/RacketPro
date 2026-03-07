@@ -144,7 +144,7 @@
 (define (rebuild-layout!)
   (define ext-panels (get-extension-layout-contributions))
   (define layout (merge-extension-panels initial-layout ext-panels))
-  (send-message! (make-message "layout:set" 'layout layout))
+  (send-message! (make-message "layout:set" 'layout (assign-layout-ids layout)))
   (rebuild-menu!))
 
 ;; Merge extension panels into the layout tree.
@@ -520,7 +520,7 @@
 
 (register-all-cells!)
 (send-message! (make-message "menu:set" 'menu app-menu))
-(send-message! (make-message "layout:set" 'layout initial-layout))
+(send-message! (make-message "layout:set" 'layout (assign-layout-ids initial-layout)))
 
 ;; Start REPL PTY
 (start-repl)

@@ -204,3 +204,52 @@
     (lambda ()
       (unload-extension! 'list-test-a)
       (unload-extension! 'list-test-b))))
+
+;; ── Test: assign-layout-ids ──────────────────────────────────────────────────
+
+(test-case "assign-layout-ids adds IDs to nodes without them"
+  (define tree
+    (hasheq 'type "vbox"
+            'props (hasheq)
+            'children
+            (list (hasheq 'type "editor"
+                          'props (hasheq)
+                          'children (list))
+                  (hasheq 'type "terminal"
+                          'props (hasheq)
+                          'children (list)))))
+  (define result (assign-layout-ids tree))
+  ;; Root gets its type as ID
+  (check-equal? (hash-ref (hash-ref result 'props) 'id) "vbox")
+  ;; Children get prefixed IDs with sibling index
+  (define children (hash-ref result 'children))
+  (check-equal? (hash-ref (hash-ref (first children) 'props) 'id)
+                "vbox/editor-0")
+  (check-equal? (hash-ref (hash-ref (second children) 'props) 'id)
+                "vbox/terminal-0"))
+
+(test-case "assign-layout-ids preserves existing IDs"
+  (define tree
+    (hasheq 'type "vbox"
+            'props (hasheq 'id "my-root")
+            'children
+            (list (hasheq 'type "editor"
+                          'props (hasheq 'id "main-editor")
+                          'children (list)))))
+  (define result (assign-layout-ids tree))
+  (check-equal? (hash-ref (hash-ref result 'props) 'id) "my-root")
+  (define children (hash-ref result 'children))
+  (check-equal? (hash-ref (hash-ref (first children) 'props) 'id) "main-editor"))
+
+(test-case "assign-layout-ids disambiguates siblings of same type"
+  (define tree
+    (hasheq 'type "vbox"
+            'props (hasheq)
+            'children
+            (list (hasheq 'type "editor" 'props (hasheq) 'children (list))
+                  (hasheq 'type "editor" 'props (hasheq) 'children (list)))))
+  (define result (assign-layout-ids tree))
+  (define children (hash-ref result 'children))
+  (define id0 (hash-ref (hash-ref (first children) 'props) 'id))
+  (define id1 (hash-ref (hash-ref (second children) 'props) 'id))
+  (check-not-equal? id0 id1))

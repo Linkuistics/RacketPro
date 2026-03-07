@@ -23,7 +23,8 @@
          reload-extension!
          list-extensions
          get-extension-handler
-         get-extension-layout-contributions)
+         get-extension-layout-contributions
+         assign-layout-ids)
 
 ;; ── Descriptor struct ────────────────────────────────────────────────────────
 
@@ -294,3 +295,39 @@
                      'layout (hash-set* rewritten
                                         'props (hash-set (hash-ref rewritten 'props (hasheq))
                                                          'data-tab-id panel-id)))))))
+
+;; ── Layout ID assignment ─────────────────────────────────────────────────────
+
+;; Walk a layout tree and assign 'id to any node missing one.
+;; IDs are generated from parent-id + type + sibling index: "vbox/editor-0", etc.
+;; Nodes that already have an 'id in their props are left unchanged.
+;; `parent-id` is the resolved ID of the parent node (empty string for the root).
+(define (assign-layout-ids tree [parent-id ""])
+  (cond
+    [(hash? tree)
+     (define node-type (hash-ref tree 'type "node"))
+     (define props (hash-ref tree 'props (hasheq)))
+     (define existing-id (hash-ref props 'id #f))
+     ;; Root nodes (no parent) get their type as ID; children get parent-id as
+     ;; their pre-computed ID (parent already formatted "parent/type-idx").
+     (define node-id (or existing-id
+                         (if (string=? parent-id "")
+                             node-type
+                             parent-id)))
+     ;; Assign ID if missing
+     (define new-props
+       (if existing-id props (hash-set props 'id node-id)))
+     ;; Recurse into children, using sibling index to disambiguate
+     (define children (hash-ref tree 'children '()))
+     (define type-counts (make-hash))  ;; track sibling indices by type
+     (define new-children
+       (for/list ([child (in-list children)])
+         (define child-type (if (hash? child) (hash-ref child 'type "node") "node"))
+         (define idx (hash-ref type-counts child-type 0))
+         (hash-set! type-counts child-type (add1 idx))
+         (define child-id (format "~a/~a-~a" node-id child-type idx))
+         (assign-layout-ids child child-id)))
+     (hash-set* tree
+                'props new-props
+                'children new-children)]
+    [else tree]))
