@@ -21,12 +21,16 @@
 
 ;; Send a request to Rust to create a PTY running a Racket REPL.
 ;; Rust will spawn the process and connect it to the frontend terminal.
-(define (start-repl)
+;; When language is "rhombus", spawns `racket -I rhombus` instead.
+(define (start-repl #:language [language "racket"])
   (set! _repl-gen (add1 _repl-gen))
+  (define args (if (string=? language "rhombus")
+                   (list "-I" "rhombus")
+                   (list)))
   (send-message! (make-message "pty:create"
                                'id "repl"
                                'command "racket"
-                               'args (list)
+                               'args args
                                'cols 80
                                'rows 24))
   (cell-set! 'status "REPL started"))
@@ -49,9 +53,9 @@
 ;; Restart the REPL (kill + recreate)
 ;; Note: the new start-repl increments the generation, so any
 ;; pty:exit from the killed REPL will be ignored by the dispatcher.
-(define (restart-repl)
+(define (restart-repl #:language [language "racket"])
   (send-message! (make-message "pty:kill" 'id "repl"))
-  (start-repl))
+  (start-repl #:language language))
 
 ;; ── Event handler ────────────────────────────────────────────
 

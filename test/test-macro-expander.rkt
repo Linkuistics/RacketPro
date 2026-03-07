@@ -382,4 +382,57 @@
   (with-output-to-string (lambda () (stop-macro-expander)))
   (delete-file tmp))
 
+;; ═══════════════════════════════════════════════════════════════════════════
+;; Test: Rhombus code in macro debugger
+;; ═══════════════════════════════════════════════════════════════════════════
+
+(define (make-temp-rhm-file content)
+  (define tmp (make-temporary-file "macro-rhm-~a.rhm"))
+  (call-with-output-file tmp
+    (lambda (out) (display content out))
+    #:exists 'replace)
+  tmp)
+
+(test-case "start-macro-expander on valid Rhombus code does not crash"
+  (reset-state!)
+  (define tmp (make-temp-rhm-file "#lang rhombus\ndef x = 42\nx\n"))
+  (check-not-exn
+    (lambda ()
+      (with-output-to-string
+        (lambda () (start-macro-expander (path->string tmp))))))
+  (define output
+    (with-output-to-string
+      (lambda () (stop-macro-expander))))
+  (delete-file tmp))
+
+(test-case "start-macro-expander on valid Rhombus code produces macro:steps (possibly empty)"
+  (reset-state!)
+  (define tmp (make-temp-rhm-file "#lang rhombus\ndef x = 42\nx\n"))
+  (define output
+    (with-output-to-string
+      (lambda () (start-macro-expander (path->string tmp)))))
+  (define msgs (parse-all-messages output))
+  ;; Should have either macro:steps or macro:error (not a crash)
+  (define steps-msg (find-message-by-type msgs "macro:steps"))
+  (define error-msg (find-message-by-type msgs "macro:error"))
+  (check-not-false (or steps-msg error-msg)
+                   "should produce macro:steps or macro:error, not crash")
+  (with-output-to-string (lambda () (stop-macro-expander)))
+  (delete-file tmp))
+
+(test-case "start-macro-expander on invalid Rhombus code produces macro:error or macro:steps"
+  (reset-state!)
+  ;; Use syntax that causes a genuine parse error
+  (define tmp (make-temp-rhm-file "#lang rhombus\n(((broken syntax\n"))
+  (define output
+    (with-output-to-string
+      (lambda () (start-macro-expander (path->string tmp)))))
+  (define msgs (parse-all-messages output))
+  ;; Should produce macro:error or macro:steps (not a crash)
+  (define error-msg (find-message-by-type msgs "macro:error"))
+  (define steps-msg (find-message-by-type msgs "macro:steps"))
+  (check-not-false (or error-msg steps-msg)
+                   "should produce macro:error or macro:steps for invalid Rhombus code, not crash")
+  (delete-file tmp))
+
 (displayln "All macro expander tests passed!")

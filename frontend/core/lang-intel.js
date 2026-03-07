@@ -98,7 +98,7 @@ export function initLangIntel(monaco, editor) {
     colorsCache.delete(uri);
     definitionsCache.delete(uri);
     const model = editor.getModel();
-    if (model) monaco.editor.setModelMarkers(model, 'racket', []);
+    if (model) monaco.editor.setModelMarkers(model, 'check-syntax', []);
     if (arrowUpdateCallback) arrowUpdateCallback(uri, []);
   });
 
@@ -132,7 +132,7 @@ function applyDiagnostics(uri, items) {
     source: d.source || 'check-syntax',
   }));
 
-  monacoRef.editor.setModelMarkers(model, 'racket', markers);
+  monacoRef.editor.setModelMarkers(model, 'check-syntax', markers);
 }
 
 // ── Semantic colors → decorations ──
@@ -162,116 +162,121 @@ function applySemanticColors(colors) {
 // ── Monaco providers ──
 
 function registerProviders(monaco) {
-  // Hover provider
-  disposables.push(
-    monaco.languages.registerHoverProvider('racket', {
-      provideHover(model, position) {
-        const uri = editorRef?.filePath || '';
-        const hovers = hoversCache.get(uri) || [];
-        for (const h of hovers) {
-          const r = h.range;
-          if (position.lineNumber >= r.startLine &&
-              position.lineNumber <= r.endLine &&
-              position.column >= r.startCol + 1 &&
-              position.column <= r.endCol + 1) {
-            return {
-              range: new monaco.Range(
-                r.startLine, r.startCol + 1,
-                r.endLine, r.endCol + 1
-              ),
-              contents: [{ value: h.contents }],
-            };
-          }
-        }
-        return null;
-      },
-    })
-  );
+  const languages = ['racket', 'rhombus'];
+  const triggerChars = { racket: ['('], rhombus: ['.'] };
 
-  // Definition provider
-  disposables.push(
-    monaco.languages.registerDefinitionProvider('racket', {
-      provideDefinition(model, position) {
-        const uri = editorRef?.filePath || '';
-        const data = definitionsCache.get(uri);
-        if (!data) return null;
-
-        // Check jump targets (references → definition sites)
-        for (const j of data.jumps) {
-          const r = j.range;
-          if (position.lineNumber >= r.startLine &&
-              position.lineNumber <= r.endLine &&
-              position.column >= r.startCol + 1 &&
-              position.column <= r.endCol + 1) {
-            // Cross-file jump — dispatch to Racket for sequenced open + goto
-            if (j.targetUri) {
-              dispatch('editor:goto-definition', {
-                path: j.targetUri,
-                name: j.name,
-              });
-              return null;
+  for (const lang of languages) {
+    // Hover provider
+    disposables.push(
+      monaco.languages.registerHoverProvider(lang, {
+        provideHover(model, position) {
+          const uri = editorRef?.filePath || '';
+          const hovers = hoversCache.get(uri) || [];
+          for (const h of hovers) {
+            const r = h.range;
+            if (position.lineNumber >= r.startLine &&
+                position.lineNumber <= r.endLine &&
+                position.column >= r.startCol + 1 &&
+                position.column <= r.endCol + 1) {
+              return {
+                range: new monaco.Range(
+                  r.startLine, r.startCol + 1,
+                  r.endLine, r.endCol + 1
+                ),
+                contents: [{ value: h.contents }],
+              };
             }
           }
-        }
+          return null;
+        },
+      })
+    );
 
-        // Check arrows — find arrow where cursor is at the "to" end
-        // and jump to the "from" end (binding site)
-        const arrows = arrowsCache.get(uri) || [];
-        for (const a of arrows) {
-          if (a.kind !== 'binding' && a.kind !== 'require') continue;
-          const r = a.to;
-          if (position.lineNumber >= r.startLine &&
-              position.lineNumber <= r.endLine &&
-              position.column >= r.startCol + 1 &&
-              position.column <= r.endCol + 1) {
-            return {
-              uri: model.uri,
-              range: new monaco.Range(
-                a.from.startLine, a.from.startCol + 1,
-                a.from.endLine, a.from.endCol + 1
-              ),
-            };
+    // Definition provider
+    disposables.push(
+      monaco.languages.registerDefinitionProvider(lang, {
+        provideDefinition(model, position) {
+          const uri = editorRef?.filePath || '';
+          const data = definitionsCache.get(uri);
+          if (!data) return null;
+
+          // Check jump targets (references → definition sites)
+          for (const j of data.jumps) {
+            const r = j.range;
+            if (position.lineNumber >= r.startLine &&
+                position.lineNumber <= r.endLine &&
+                position.column >= r.startCol + 1 &&
+                position.column <= r.endCol + 1) {
+              // Cross-file jump — dispatch to Racket for sequenced open + goto
+              if (j.targetUri) {
+                dispatch('editor:goto-definition', {
+                  path: j.targetUri,
+                  name: j.name,
+                });
+                return null;
+              }
+            }
           }
-        }
-        return null;
-      },
-    })
-  );
 
-  // Completion provider (request/response with Racket)
-  disposables.push(
-    monaco.languages.registerCompletionItemProvider('racket', {
-      triggerCharacters: ['('],
-      async provideCompletionItems(model, position) {
-        const word = model.getWordUntilPosition(position);
-        const range = {
-          startLineNumber: position.lineNumber,
-          endLineNumber: position.lineNumber,
-          startColumn: word.startColumn,
-          endColumn: word.endColumn,
-        };
-        const uri = editorRef?.filePath || '';
+          // Check arrows — find arrow where cursor is at the "to" end
+          // and jump to the "from" end (binding site)
+          const arrows = arrowsCache.get(uri) || [];
+          for (const a of arrows) {
+            if (a.kind !== 'binding' && a.kind !== 'require') continue;
+            const r = a.to;
+            if (position.lineNumber >= r.startLine &&
+                position.lineNumber <= r.endLine &&
+                position.column >= r.startCol + 1 &&
+                position.column <= r.endCol + 1) {
+              return {
+                uri: model.uri,
+                range: new monaco.Range(
+                  a.from.startLine, a.from.startCol + 1,
+                  a.from.endLine, a.from.endCol + 1
+                ),
+              };
+            }
+          }
+          return null;
+        },
+      })
+    );
 
-        try {
-          const response = await request('intel:completion-request', {
-            uri,
-            position: { line: position.lineNumber, col: position.column - 1 },
-            prefix: word.word,
-          });
+    // Completion provider (request/response with Racket)
+    disposables.push(
+      monaco.languages.registerCompletionItemProvider(lang, {
+        triggerCharacters: triggerChars[lang],
+        async provideCompletionItems(model, position) {
+          const word = model.getWordUntilPosition(position);
+          const range = {
+            startLineNumber: position.lineNumber,
+            endLineNumber: position.lineNumber,
+            startColumn: word.startColumn,
+            endColumn: word.endColumn,
+          };
+          const uri = editorRef?.filePath || '';
 
-          const items = (response?.items || []).map((item) => ({
-            label: item.label,
-            kind: monaco.languages.CompletionItemKind.Variable,
-            insertText: item.label,
-            range,
-          }));
+          try {
+            const response = await request('intel:completion-request', {
+              uri,
+              position: { line: position.lineNumber, col: position.column - 1 },
+              prefix: word.word,
+            });
 
-          return { suggestions: items };
-        } catch (err) {
-          console.error('[lang-intel] Completion request failed:', err);
-          return { suggestions: [] };
-        }
-      },
-    })
-  );
+            const items = (response?.items || []).map((item) => ({
+              label: item.label,
+              kind: monaco.languages.CompletionItemKind.Variable,
+              insertText: item.label,
+              range,
+            }));
+
+            return { suggestions: items };
+          } catch (err) {
+            console.error('[lang-intel] Completion request failed:', err);
+            return { suggestions: [] };
+          }
+        },
+      })
+    );
+  }
 }

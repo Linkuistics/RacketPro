@@ -2,6 +2,7 @@
 
 (require rackunit
          json
+         racket/list
          racket/port
          racket/string
          "../racket/heavymental-core/protocol.rkt"
@@ -93,6 +94,7 @@
   (check-not-false pty-msg "pty:create message should be present")
   (check-equal? (hash-ref pty-msg 'id) "repl")
   (check-equal? (hash-ref pty-msg 'command) "racket")
+  (check-equal? (hash-ref pty-msg 'args) (list) "default args should be empty list")
   (check-equal? (hash-ref pty-msg 'cols) 80)
   (check-equal? (hash-ref pty-msg 'rows) 24))
 
@@ -115,7 +117,7 @@
   (define pty-msg (findf (lambda (m) (string=? (hash-ref m 'type) "pty:write")) msgs))
   (check-not-false pty-msg "pty:write message should be present")
   (check-equal? (hash-ref pty-msg 'id) "repl")
-  (check-equal? (hash-ref pty-msg 'data) ",enter \"/home/user/hello.rkt\"\n"))
+  (check-equal? (hash-ref pty-msg 'data) ",enter (file \"/home/user/hello.rkt\")\n"))
 
 (test-case "run-file sets status cell to Running <path>"
   (reset-cells!)
@@ -364,5 +366,43 @@
       (handle-repl-event
        (make-message "pty:exit" 'code 1))))
   (check-equal? (cell-ref 'status) "REPL exited (code 1)"))
+
+;; ═══════════════════════════════════════════════════════════════════════════
+;; Test: Language-aware REPL spawning
+;; ═══════════════════════════════════════════════════════════════════════════
+
+(test-case "start-repl with #:language rhombus sends -I rhombus args"
+  (reset-cells!)
+  (define output
+    (with-output-to-string
+      (lambda () (start-repl #:language "rhombus"))))
+  (define msgs (parse-all-messages output))
+  (define pty-msg (findf (lambda (m) (string=? (hash-ref m 'type) "pty:create")) msgs))
+  (check-not-false pty-msg "pty:create message should be present")
+  (check-equal? (hash-ref pty-msg 'command) "racket")
+  (check-equal? (hash-ref pty-msg 'args) (list "-I" "rhombus")))
+
+(test-case "start-repl with no args sends empty args (backward compat)"
+  (reset-cells!)
+  (define output
+    (with-output-to-string
+      (lambda () (start-repl))))
+  (define msgs (parse-all-messages output))
+  (define pty-msg (findf (lambda (m) (string=? (hash-ref m 'type) "pty:create")) msgs))
+  (check-not-false pty-msg)
+  (check-equal? (hash-ref pty-msg 'args) (list)))
+
+(test-case "restart-repl with #:language rhombus kills then creates rhombus REPL"
+  (reset-cells!)
+  (define output
+    (with-output-to-string
+      (lambda () (restart-repl #:language "rhombus"))))
+  (define msgs (parse-all-messages output))
+  ;; Should have a pty:kill followed by pty:create
+  (define kill-msg (findf (lambda (m) (string=? (hash-ref m 'type) "pty:kill")) msgs))
+  (check-not-false kill-msg "pty:kill message should be present")
+  (define pty-msg (findf (lambda (m) (string=? (hash-ref m 'type) "pty:create")) msgs))
+  (check-not-false pty-msg "pty:create message should be present")
+  (check-equal? (hash-ref pty-msg 'args) (list "-I" "rhombus")))
 
 (displayln "All Phase 2 tests passed!")

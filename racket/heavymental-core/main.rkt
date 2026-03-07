@@ -29,6 +29,10 @@
 ;; Used to ignore pty:exit events from stale (killed) REPL processes.
 (define _last-repl-gen 0)
 
+;; Track which language the current REPL is running.
+;; Used to decide whether we need to restart the REPL when running a file.
+(define _current-repl-lang "racket")
+
 ;; ── Layout ─────────────────────────────────────────────────
 ;; Zed-like layout:
 ;;   vbox (full height)
@@ -230,7 +234,13 @@
     ;; REPL restart
     [(string=? event-name "repl:restart")
      (cell-set! 'repl-running #f)
-     (restart-repl)
+     (define path (current-file-path))
+     (define lang (if (and path (not (string=? path "")))
+                      (detect-language path)
+                      "racket"))
+     (define repl-lang (if (string=? lang "rhombus") "rhombus" "racket"))
+     (set! _current-repl-lang repl-lang)
+     (restart-repl #:language repl-lang)
      (set! _last-repl-gen (repl-generation))]
     ;; Completion request
     [(string=? event-name "intel:completion-request")
@@ -239,8 +249,14 @@
     [(string=? event-name "stepper:start")
      (define path (message-ref msg 'path (current-file-path)))
      (when (and path (not (string=? path "")) (not (string=? path "untitled.rkt")))
-       (start-stepper path)
-       (cell-set! 'current-bottom-tab "stepper"))]
+       (cond
+         [(string=? (detect-language path) "rhombus")
+          (send-message! (make-message "stepper:error"
+                                       'error "The stepper is not yet supported for Rhombus files. It currently only works with #lang racket."))
+          (cell-set! 'current-bottom-tab "stepper")]
+         [else
+          (start-stepper path)
+          (cell-set! 'current-bottom-tab "stepper")]))]
     [(string=? event-name "stepper:stop")
      (stop-stepper)]
     [(string=? event-name "stepper:forward")
@@ -292,8 +308,14 @@
     [(string=? action "step-through")
      (define path (current-file-path))
      (when (and path (not (string=? path "")) (not (string=? path "untitled.rkt")))
-       (start-stepper path)
-       (cell-set! 'current-bottom-tab "stepper"))]
+       (cond
+         [(string=? (detect-language path) "rhombus")
+          (send-message! (make-message "stepper:error"
+                                       'error "The stepper is not yet supported for Rhombus files. It currently only works with #lang racket."))
+          (cell-set! 'current-bottom-tab "stepper")]
+         [else
+          (start-stepper path)
+          (cell-set! 'current-bottom-tab "stepper")]))]
     [(string=? action "stop-stepper")
      (stop-stepper)]
     [(string=? action "expand-macros")
@@ -312,6 +334,13 @@
      (set-pending-run!)
      (send-message! (make-message "editor:request-save"))]
     [else
+     (define lang (detect-language path))
+     (define repl-lang (if (string=? lang "rhombus") "rhombus" "racket"))
+     ;; If the REPL language doesn't match, restart with the right one
+     (when (not (string=? repl-lang _current-repl-lang))
+       (set! _current-repl-lang repl-lang)
+       (restart-repl #:language repl-lang)
+       (set! _last-repl-gen (repl-generation)))
      (cell-set! 'repl-running #t)
      (clear-repl)
      (run-file path)]))
