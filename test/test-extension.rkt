@@ -321,3 +321,53 @@
   (with-output-to-string
     (lambda () (unload-extension! 'watcher-test)))
   (check-true deactivated))
+
+;; ── Integration: full extension lifecycle ────────────────────────────────────
+
+(test-case "integration: load → use → reload → unload lifecycle"
+  ;; Load
+  (define-extension integration-ext
+    #:name "Integration"
+    #:cells ([val 0])
+    #:events ([#:name "bump"
+               #:handler (lambda (msg)
+                           (cell-update! 'integration-ext:val add1))]))
+  (with-output-to-string
+    (lambda () (load-extension-descriptor! integration-ext)))
+
+  ;; Use
+  (define handler (get-extension-handler "integration-ext:bump"))
+  (with-output-to-string (lambda () (handler (hasheq))))
+  (check-equal? (cell-ref 'integration-ext:val) 1)
+
+  ;; Verify it's listed
+  (check-true (> (length (list-extensions)) 0))
+
+  ;; Unload
+  (with-output-to-string
+    (lambda () (unload-extension! 'integration-ext)))
+  (check-false (get-extension-handler "integration-ext:bump"))
+
+  ;; Re-load (simulating reload)
+  (with-output-to-string
+    (lambda () (load-extension-descriptor! integration-ext)))
+  (check-equal? (cell-ref 'integration-ext:val) 0)  ;; reset to initial
+  (with-output-to-string
+    (lambda () (unload-extension! 'integration-ext))))
+
+(test-case "integration: extension layout contributions have correct IDs"
+  (define-extension layout-int-test
+    #:name "Layout Integration"
+    #:panels ([#:id "my-panel" #:label "Test Panel" #:tab 'bottom
+               #:layout (hasheq 'type "vbox"
+                                'props (hasheq)
+                                'children (list))]))
+  (with-output-to-string
+    (lambda () (load-extension-descriptor! layout-int-test)))
+  (define contributions (get-extension-layout-contributions))
+  (check-true (> (length contributions) 0))
+  (define panel (first contributions))
+  (check-equal? (hash-ref panel 'id) "layout-int-test:my-panel")
+  (check-equal? (hash-ref panel 'label) "Test Panel")
+  (with-output-to-string
+    (lambda () (unload-extension! 'layout-int-test))))
