@@ -245,6 +245,21 @@
      (stepper-back)]
     [(string=? event-name "stepper:continue")
      (stepper-continue)]
+    ;; Cross-file go-to-definition (from lang-intel.js definition provider)
+    [(string=? event-name "editor:goto-definition")
+     (define path (message-ref msg 'path ""))
+     (define name (message-ref msg 'name ""))
+     (when (and (not (string=? path ""))
+                (not (string=? name "")))
+       (cond
+         ;; If the file is already open, analyze and jump
+         [(string=? path (current-file-path))
+          ;; Already open — run check-syntax to find definition
+          (void)] ;; Same-file definitions are handled by arrows, not jump targets
+         [else
+          ;; Open file, then find definition after it loads
+          (set-pending-goto! path #:name name)
+          (send-message! (make-message "file:read" 'path path))]))]
     ;; Bottom panel tab selection
     [(string=? event-name "bottom-tab:select")
      (define tab (message-ref msg 'tab "terminal"))

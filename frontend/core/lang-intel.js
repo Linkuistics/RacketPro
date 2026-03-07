@@ -4,7 +4,7 @@
 // Monaco providers. This is a thin rendering layer — Racket does
 // all the heavy lifting.
 
-import { onMessage, request, resolveRequest } from './bridge.js';
+import { onMessage, request, resolveRequest, dispatch } from './bridge.js';
 
 // Per-URI caches
 const diagnosticsCache = new Map();
@@ -203,9 +203,12 @@ function registerProviders(monaco) {
               position.lineNumber <= r.endLine &&
               position.column >= r.startCol + 1 &&
               position.column <= r.endCol + 1) {
-            // Cross-file jump
+            // Cross-file jump — dispatch to Racket for sequenced open + goto
             if (j.targetUri) {
-              // TODO: open the target file
+              dispatch('editor:goto-definition', {
+                path: j.targetUri,
+                name: j.name,
+              });
               return null;
             }
           }
