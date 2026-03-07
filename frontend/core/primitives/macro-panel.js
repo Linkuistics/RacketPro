@@ -1,8 +1,9 @@
 // primitives/macro-panel.js — hm-macro-panel
 //
-// Displays a macro expansion tree with a detail view.
-// Left pane: collapsible tree of macro applications.
-// Right pane: before/after forms in read-only Monaco editors.
+// Displays macro expansion steps with two views:
+// - Stepper: flat list of expansion steps with prev/next navigation
+// - Tree: hierarchical view of expansion structure (added in Task 4)
+// Right pane: before/after with foci highlighting, pattern section.
 
 import { LitElement, html, css } from 'lit';
 import { onMessage, dispatch } from '../bridge.js';
@@ -48,69 +49,85 @@ class HmMacroPanel extends LitElement {
       background: var(--bg-tab-hover, #F0F0F0);
     }
 
+    .toolbar button.active {
+      background: var(--accent-bg, #E3F2FD);
+      border-color: var(--accent, #007ACC);
+      color: var(--accent, #007ACC);
+    }
+
+    .toolbar button:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+
+    .step-counter {
+      font-size: 12px;
+      color: var(--fg-secondary, #616161);
+      margin-left: auto;
+    }
+
     .content {
       display: flex;
       flex: 1;
       overflow: hidden;
     }
 
-    .tree-pane {
+    .step-list {
       width: 40%;
       min-width: 200px;
       overflow: auto;
       border-right: 1px solid var(--border, #D4D4D4);
-      padding: 8px;
+    }
+
+    .step-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      cursor: pointer;
+      font-family: var(--font-editor, "SF Mono", Menlo, monospace);
+      font-size: 12px;
+      font-weight: var(--font-editor-weight, 300);
+      border-bottom: 1px solid var(--border-light, #EEEEEE);
+    }
+
+    .step-item:hover {
+      background: var(--bg-tab-hover, #F0F0F0);
+    }
+
+    .step-item.selected {
+      background: var(--accent-bg, #E3F2FD);
+      color: var(--accent, #007ACC);
+    }
+
+    .step-num {
+      color: var(--fg-muted, #999999);
+      font-size: 11px;
+      min-width: 24px;
+    }
+
+    .step-type {
+      font-size: 10px;
+      padding: 1px 4px;
+      border-radius: 2px;
+      background: var(--bg-panel, #F5F5F5);
+      color: var(--fg-muted, #999999);
+    }
+
+    .step-type.macro {
+      background: #E3F2FD;
+      color: #1565C0;
+    }
+
+    .step-macro {
+      color: var(--accent, #007ACC);
+      font-weight: 500;
     }
 
     .detail-pane {
       flex: 1;
       overflow: auto;
       padding: 8px 12px;
-    }
-
-    .tree-node {
-      padding: 2px 0;
-    }
-
-    .tree-label {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      padding: 2px 4px;
-      border-radius: 3px;
-      cursor: pointer;
-      font-family: var(--font-editor, "SF Mono", Menlo, monospace);
-      font-size: 12px;
-      font-weight: var(--font-editor-weight, 300);
-    }
-
-    .tree-label:hover {
-      background: var(--bg-tab-hover, #F0F0F0);
-    }
-
-    .tree-label.selected {
-      background: var(--accent-bg, #E3F2FD);
-      color: var(--accent, #007ACC);
-    }
-
-    .tree-children {
-      padding-left: 16px;
-    }
-
-    .toggle {
-      width: 12px;
-      text-align: center;
-      color: var(--fg-muted, #999999);
-      flex-shrink: 0;
-    }
-
-    .macro-name {
-      color: var(--accent, #007ACC);
-      font-weight: 500;
-    }
-
-    .arrow {
-      color: var(--fg-muted, #999999);
     }
 
     .detail-section {
@@ -145,11 +162,16 @@ class HmMacroPanel extends LitElement {
       gap: 8px;
       font-size: 12px;
       color: var(--fg-secondary, #616161);
-      margin-top: 8px;
+      margin-bottom: 8px;
     }
 
     .info-label {
       color: var(--fg-muted, #999999);
+    }
+
+    .macro-name {
+      color: var(--accent, #007ACC);
+      font-weight: 500;
     }
 
     .empty {
@@ -159,54 +181,118 @@ class HmMacroPanel extends LitElement {
       text-align: center;
     }
 
-    .pattern-placeholder {
-      padding: 8px;
-      background: #FFFDE7;
-      border: 1px solid #FBC02D;
-      border-radius: 4px;
+    .focus-highlight {
+      background: #FFF9C4;
+      border-radius: 2px;
+      padding: 0 1px;
+    }
+
+    .focus-after-highlight {
+      background: #C8E6C9;
+      border-radius: 2px;
+      padding: 0 1px;
+    }
+
+    .filter-select {
       font-size: 12px;
-      color: var(--fg-secondary, #616161);
-      font-style: italic;
+      border: 1px solid var(--border, #D4D4D4);
+      border-radius: 3px;
+      padding: 2px 4px;
+      background: var(--bg-primary, #FFFFFF);
+      font-family: inherit;
+    }
+
+    .pattern-section {
+      padding: 8px;
+      background: #E8F5E9;
+      border: 1px solid #A5D6A7;
+      border-radius: 4px;
+      font-family: var(--font-editor, "SF Mono", Menlo, monospace);
+      font-size: 12px;
+    }
+
+    .pattern-source {
+      font-size: 11px;
+      color: var(--fg-muted, #999999);
+      margin-top: 4px;
     }
   `;
 
   constructor() {
     super();
-    this._forms = [];
-    this._selectedNode = null;
-    this._expandedNodes = new Set();
+    this._steps = [];
+    this._currentIndex = -1;
     this._unsubs = [];
     this._error = null;
+    this._filter = 'all'; // 'all' | 'macro'
+    this._patterns = new Map(); // stepId -> pattern data
+  }
+
+  get _filteredSteps() {
+    if (this._filter === 'macro') {
+      return this._steps.filter(s => s.type === 'macro');
+    }
+    return this._steps;
+  }
+
+  get _currentStep() {
+    const steps = this._filteredSteps;
+    if (this._currentIndex >= 0 && this._currentIndex < steps.length) {
+      return steps[this._currentIndex];
+    }
+    return null;
   }
 
   firstUpdated() {
     setTimeout(() => {
       this._unsubs.push(
-        onMessage('macro:tree', (msg) => {
-          this._forms = msg.forms || [];
-          this._selectedNode = null;
+        onMessage('macro:steps', (msg) => {
+          this._steps = msg.steps || [];
+          this._currentIndex = this._steps.length > 0 ? 0 : -1;
           this._error = null;
-          // Auto-expand first level
-          for (const f of this._forms) {
-            if (f.macro) this._expandedNodes.add(f.id);
+          this._patterns.clear();
+          this.requestUpdate();
+        }),
+        onMessage('macro:pattern', (msg) => {
+          if (msg.stepId) {
+            this._patterns.set(msg.stepId, msg);
           }
           this.requestUpdate();
         }),
         onMessage('macro:error', (msg) => {
           this._error = msg.error || 'Unknown error';
-          this._forms = [];
-          this._selectedNode = null;
+          this._steps = [];
+          this._currentIndex = -1;
           this.requestUpdate();
         }),
         onMessage('macro:clear', () => {
-          this._forms = [];
-          this._selectedNode = null;
+          this._steps = [];
+          this._currentIndex = -1;
           this._error = null;
-          this._expandedNodes.clear();
+          this._patterns.clear();
           this.requestUpdate();
         })
       );
     }, 0);
+
+    // Keyboard navigation
+    this.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        this._prevStep();
+      } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        this._nextStep();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        dispatch('macro:stop');
+      }
+    });
+
+    // Make focusable for keyboard events
+    if (!this.hasAttribute('tabindex')) {
+      this.setAttribute('tabindex', '0');
+    }
   }
 
   disconnectedCallback() {
@@ -214,109 +300,93 @@ class HmMacroPanel extends LitElement {
     for (const u of this._unsubs) u();
   }
 
-  _toggleNode(id) {
-    if (this._expandedNodes.has(id)) {
-      this._expandedNodes.delete(id);
-    } else {
-      this._expandedNodes.add(id);
+  updated() {
+    // Scroll selected step into view
+    const selected = this.shadowRoot?.querySelector('.step-item.selected');
+    if (selected) {
+      selected.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
-    this.requestUpdate();
   }
 
-  _selectNode(node) {
-    this._selectedNode = node;
-    this.requestUpdate();
-  }
-
-  _collapseAll() {
-    this._expandedNodes.clear();
-    this.requestUpdate();
-  }
-
-  _expandAll() {
-    const walk = (nodes) => {
-      for (const n of nodes) {
-        if (n.children && n.children.length > 0) {
-          this._expandedNodes.add(n.id);
-          walk(n.children);
-        }
-      }
-    };
-    walk(this._forms);
-    this.requestUpdate();
-  }
-
-  _renderNode(node) {
-    if (!node.macro && (!node.children || node.children.length === 0)) {
-      return html``; // Skip leaf nodes with no macro
+  _prevStep() {
+    if (this._currentIndex > 0) {
+      this._currentIndex--;
+      this.requestUpdate();
     }
+  }
 
-    const hasChildren = node.children && node.children.length > 0;
-    const isExpanded = this._expandedNodes.has(node.id);
-    const isSelected = this._selectedNode?.id === node.id;
+  _nextStep() {
+    const steps = this._filteredSteps;
+    if (this._currentIndex < steps.length - 1) {
+      this._currentIndex++;
+      this.requestUpdate();
+    }
+  }
 
-    // Truncate before string for tree display
-    const summary = node.before?.length > 40
-      ? node.before.substring(0, 40) + '...'
-      : node.before || '';
+  _selectStep(index) {
+    this._currentIndex = index;
+    this.requestUpdate();
+  }
+
+  _setFilter(filter) {
+    this._filter = filter;
+    this._currentIndex = this._filteredSteps.length > 0 ? 0 : -1;
+    this.requestUpdate();
+  }
+
+  _renderStepItem(step, index) {
+    const isSelected = index === this._currentIndex;
+    const isMacro = step.type === 'macro';
 
     return html`
-      <div class="tree-node">
-        <div class="tree-label ${isSelected ? 'selected' : ''}"
-             @click=${() => this._selectNode(node)}>
-          ${hasChildren
-            ? html`<span class="toggle" @click=${(e) => { e.stopPropagation(); this._toggleNode(node.id); }}>
-                ${isExpanded ? '\u25BC' : '\u25B6'}
-              </span>`
-            : html`<span class="toggle"></span>`}
-          ${node.macro
-            ? html`<span class="macro-name">${node.macro}</span>
-                   <span class="arrow">\u2192</span>`
-            : ''}
-          <span>${summary}</span>
-        </div>
-        ${hasChildren && isExpanded ? html`
-          <div class="tree-children">
-            ${node.children.map(c => this._renderNode(c))}
-          </div>
-        ` : ''}
+      <div class="step-item ${isSelected ? 'selected' : ''}"
+           @click=${() => this._selectStep(index)}>
+        <span class="step-num">${index + 1}</span>
+        <span class="step-type ${isMacro ? 'macro' : ''}">${step.type}</span>
+        ${step.macro ? html`<span class="step-macro">${step.macro}</span>` : ''}
       </div>
     `;
   }
 
   _renderDetail() {
-    const node = this._selectedNode;
-    if (!node) {
-      return html`<div class="empty">Select a node in the expansion tree</div>`;
+    const step = this._currentStep;
+    if (!step) {
+      return html`<div class="empty">Select a step to view details</div>`;
     }
 
+    const pattern = this._patterns.get(step.id);
+
     return html`
-      ${node.macro ? html`
-        <div class="info-row">
-          <span class="info-label">Macro:</span>
-          <span class="macro-name">${node.macro}</span>
-        </div>
-      ` : ''}
+      <div class="info-row">
+        <span class="info-label">Step:</span>
+        <span>${step.typeLabel || step.type}</span>
+        ${step.macro ? html`
+          <span class="info-label" style="margin-left: 8px">Macro:</span>
+          <span class="macro-name">${step.macro}</span>
+        ` : ''}
+      </div>
 
       <div class="detail-section">
         <div class="detail-label">Before</div>
-        <div class="code-block">${node.before || '(empty)'}</div>
+        <div class="code-block">${step.before || '(empty)'}</div>
       </div>
-
-      ${node.after ? html`
-        <div class="detail-section">
-          <div class="detail-label">After</div>
-          <div class="code-block">${node.after}</div>
-        </div>
-      ` : ''}
 
       <div class="detail-section">
-        <div class="detail-label">Pattern Match</div>
-        <div class="pattern-placeholder">
-          Pattern match highlighting not yet available.
-          Will show SyntaxSpec pattern matches in a future update.
-        </div>
+        <div class="detail-label">After</div>
+        <div class="code-block">${step.after || '(empty)'}</div>
       </div>
+
+      ${pattern ? html`
+        <div class="detail-section">
+          <div class="detail-label">Pattern</div>
+          <div class="pattern-section">
+            <div>${pattern.pattern}</div>
+            ${pattern.source ? html`
+              <div class="pattern-source">from: ${pattern.source}</div>
+            ` : ''}
+          </div>
+        </div>
+      ` : ''}
     `;
   }
 
@@ -330,7 +400,7 @@ class HmMacroPanel extends LitElement {
       `;
     }
 
-    if (this._forms.length === 0) {
+    if (this._steps.length === 0) {
       return html`
         <div class="toolbar">
           <span style="color: var(--fg-muted, #999); font-size: 12px;">
@@ -341,15 +411,27 @@ class HmMacroPanel extends LitElement {
       `;
     }
 
+    const steps = this._filteredSteps;
+    const total = steps.length;
+    const current = this._currentIndex + 1;
+
     return html`
       <div class="toolbar">
-        <button @click=${() => this._expandAll()}>Expand All</button>
-        <button @click=${() => this._collapseAll()}>Collapse All</button>
+        <button @click=${() => this._prevStep()}
+                ?disabled=${this._currentIndex <= 0}>\u25C0 Prev</button>
+        <button @click=${() => this._nextStep()}
+                ?disabled=${this._currentIndex >= total - 1}>Next \u25B6</button>
+        <select class="filter-select"
+                @change=${(e) => this._setFilter(e.target.value)}>
+          <option value="all" ?selected=${this._filter === 'all'}>All steps</option>
+          <option value="macro" ?selected=${this._filter === 'macro'}>Macro only</option>
+        </select>
+        <span class="step-counter">Step ${current} of ${total}</span>
         <button @click=${() => dispatch('macro:stop')}>Clear</button>
       </div>
       <div class="content">
-        <div class="tree-pane">
-          ${this._forms.map(f => this._renderNode(f))}
+        <div class="step-list">
+          ${steps.map((s, i) => this._renderStepItem(s, i))}
         </div>
         <div class="detail-pane">
           ${this._renderDetail()}
