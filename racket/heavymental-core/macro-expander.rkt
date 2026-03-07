@@ -6,12 +6,14 @@
          racket/pretty
          racket/string
          racket/struct
+         syntax/modread
          macro-debugger/model/trace
          macro-debugger/model/reductions
          macro-debugger/model/steps
          macro-debugger/model/deriv
          "protocol.rkt"
-         "cell.rkt")
+         "cell.rkt"
+         "pattern-extractor.rkt")
 
 (provide start-macro-expander
          stop-macro-expander)
@@ -82,6 +84,19 @@
            (<= (+ (sub1 pos) spn) (string-length source-text)))
       (substring source-text (sub1 pos) (+ (sub1 pos) spn))
       #f))
+
+;; Check if a step's source location is within the user's file
+;; (filters out steps from internal modules like racket/base internals)
+(define (step-in-source? s source-path)
+  (define before-stx (step-term1 s))
+  (define src (syntax-source before-stx))
+  (and src
+       (or (equal? src source-path)
+           (and (path? src) (path? source-path)
+                (equal? (path->string src) (path->string source-path)))
+           ;; Also accept string path matching
+           (and (string? source-path) (path? src)
+                (equal? (path->string src) source-path)))))
 
 ;; ── Step serialization ───────────────────────────────────
 
@@ -185,6 +200,54 @@
                    (collect-child-trees val (add1 depth))]
                   [else '()]))))]))
 
+;; ── Tracing ──────────────────────────────────────────────
+
+;; Try to read and trace as a whole module (handles #lang, user-defined macros)
+;; Falls back to per-form tracing if module reading fails
+(define (trace-file path text)
+  (with-handlers
+    ([exn:fail?
+      (lambda (e)
+        ;; Fallback: trace individual forms (no #lang support)
+        (trace-forms-individually path text))])
+    (define port (open-input-string text))
+    (port-count-lines! port)
+    (define module-stx
+      (with-module-reading-parameterization
+        (lambda () (read-syntax (string->path path) port))))
+    (parameterize ([current-namespace (make-base-namespace)])
+      (define-values (result deriv) (trace/result module-stx))
+      (list deriv (reductions deriv)))))
+
+;; Fallback: trace each form independently with make-base-namespace
+(define (trace-forms-individually path text)
+  (define port (open-input-string text))
+  (port-count-lines! port)
+  ;; Skip #lang line
+  (with-handlers ([exn:fail? (lambda (e) (void))])
+    (read-language port (lambda () #f)))
+  ;; Read forms
+  (define forms
+    (let loop ([acc '()])
+      (define stx (read-syntax path port))
+      (if (eof-object? stx)
+          (reverse acc)
+          (loop (cons stx acc)))))
+  (if (null? forms)
+      (list #f #f)
+      ;; Combine all derivations/reductions
+      (let ([all-derivs '()]
+            [all-reds '()])
+        (for ([form (in-list forms)])
+          (with-handlers ([exn:fail? (lambda (e) (void))])
+            (parameterize ([current-namespace (make-base-namespace)])
+              (define-values (result deriv) (trace/result form))
+              (set! all-derivs (cons deriv all-derivs))
+              (set! all-reds (append all-reds (reductions deriv))))))
+        ;; Return first deriv (for tree) and combined reductions
+        (list (if (null? all-derivs) #f (car (reverse all-derivs)))
+              all-reds))))
+
 ;; ── Public API ────────────────────────────────────────────
 
 (define (start-macro-expander path #:macro-only? [macro-only? #f])
@@ -200,61 +263,63 @@
                       (stop-macro-expander))])
     ;; Read the source file
     (define text (file->string path))
-    (define port (open-input-string text))
-    (port-count-lines! port)
 
-    ;; Skip #lang line by reading it
-    (with-handlers ([exn:fail? (lambda (e) (void))])
-      (read-language port (lambda () #f)))
-
-    ;; Read all remaining forms as syntax
-    (define forms
-      (let loop ([acc '()])
-        (define stx (read-syntax path port))
-        (if (eof-object? stx)
-            (reverse acc)
-            (loop (cons stx acc)))))
-
-    ;; If no forms, emit empty steps and tree
-    (when (null? forms)
+    ;; Handle empty files
+    (when (string=? (string-trim text) "")
       (send-message! (make-message "macro:steps" 'steps (list)))
       (send-message! (make-message "macro:tree" 'forms (list)))
       (cell-set! 'current-bottom-tab "macros"))
 
-    ;; Trace each form once — collect both steps and derivations
-    (unless (null? forms)
-      (define trace-results
-        (for/list ([form (in-list forms)])
-          (with-handlers ([exn:fail? (lambda (e) (list #f #f))])
-            (parameterize ([current-namespace (make-base-namespace)])
-              (define-values (result deriv) (trace/result form))
-              (list deriv (reductions deriv))))))
+    (unless (string=? (string-trim text) "")
+      ;; Trace the file — module-level or per-form fallback
+      (define trace-result (trace-file path text))
+      (define deriv (car trace-result))
+      (define all-reds (cadr trace-result))
 
-      ;; Build flat step list
-      (define all-rw-steps
-        (apply append
-               (for/list ([tr trace-results])
-                 (define red (cadr tr))
-                 (if red
-                     (let ([rw (filter rewrite-step? red)])
-                       (if macro-only?
-                           (filter (lambda (s) (eq? (protostep-type s) 'macro)) rw)
-                           rw))
-                     '()))))
+      (cond
+        [(not all-reds)
+         ;; No reductions at all
+         (send-message! (make-message "macro:steps" 'steps (list)))
+         (send-message! (make-message "macro:tree" 'forms (list)))]
+        [else
+         ;; Filter to rewrite steps, optionally source-local only
+         (define rw-steps (filter rewrite-step? all-reds))
+         ;; Filter to steps originating from this file (not internal modules)
+         (define source-steps
+           (filter (lambda (s) (step-in-source? s path)) rw-steps))
+         ;; Apply macro-only filter
+         (define filtered-steps
+           (if macro-only?
+               (filter (lambda (s) (eq? (protostep-type s) 'macro)) source-steps)
+               source-steps))
 
-      (define step-jsons (for/list ([s all-rw-steps]) (step->json s text)))
-      (send-message! (make-message "macro:steps" 'steps step-jsons))
+         ;; Serialize and send steps
+         (define step-jsons (for/list ([s filtered-steps]) (step->json s text)))
+         (send-message! (make-message "macro:steps" 'steps step-jsons))
 
-      ;; Build tree from derivations
-      (define tree-forms
-        (filter values
-                (for/list ([tr trace-results])
-                  (define deriv (car tr))
-                  (if deriv
-                      (with-handlers ([exn:fail? (lambda (e) #f)])
-                        (deriv->tree deriv))
-                      #f))))
-      (send-message! (make-message "macro:tree" 'forms tree-forms))
+         ;; Build tree from derivation
+         (define tree-forms
+           (if deriv
+               (let ([tree (with-handlers ([exn:fail? (lambda (e) #f)])
+                             (deriv->tree deriv))])
+                 (if tree (list tree) (list)))
+               (list)))
+         (send-message! (make-message "macro:tree" 'forms tree-forms))
+
+         ;; Attempt pattern extraction for macro steps
+         (for ([step-json (in-list step-jsons)])
+           (when (string=? (hash-ref step-json 'type) "macro")
+             (define macro-name (hash-ref step-json 'macro #f))
+             (when macro-name
+               (with-handlers ([exn:fail? (lambda (e) (void))])
+                 (define pattern-info (extract-pattern macro-name path))
+                 (when pattern-info
+                   (send-message!
+                     (make-message "macro:pattern"
+                                   'stepId (hash-ref step-json 'id)
+                                   'pattern (hash-ref pattern-info 'pattern)
+                                   'variables (hash-ref pattern-info 'variables)
+                                   'source (format "~a" path))))))))])
 
       (cell-set! 'current-bottom-tab "macros"))))
 

@@ -335,4 +335,51 @@
   (with-output-to-string (lambda () (stop-macro-expander)))
   (delete-file tmp))
 
+;; ═══════════════════════════════════════════════════════════════════════════
+;; Test: macro:pattern messages
+;; ═══════════════════════════════════════════════════════════════════════════
+
+(test-case "macro:pattern emitted for syntax-parse macros"
+  (reset-state!)
+  ;; Create a file that defines and uses a syntax-parse macro
+  (define macro-file (make-temp-rkt-file
+    (string-append
+      "#lang racket/base\n"
+      "(require syntax/parse/define)\n"
+      "(define-syntax-parse-rule (my-when test:expr body:expr ...)\n"
+      "  (if test (begin body ...) (void)))\n"
+      "(my-when #t (displayln \"hi\"))\n")))
+  (define output
+    (with-output-to-string
+      (lambda () (start-macro-expander (path->string macro-file)))))
+  (define msgs (parse-all-messages output))
+
+  ;; Should have a macro:pattern message
+  (define pattern-msgs (find-all-messages-by-type msgs "macro:pattern"))
+  (check-true (> (length pattern-msgs) 0) "should emit at least one macro:pattern")
+
+  (define first-pattern (car pattern-msgs))
+  (check-true (hash-has-key? first-pattern 'pattern))
+  (check-true (hash-has-key? first-pattern 'variables))
+  (check-true (string-contains? (hash-ref first-pattern 'pattern) "my-when"))
+
+  (with-output-to-string (lambda () (stop-macro-expander)))
+  (delete-file macro-file))
+
+(test-case "no macro:pattern for built-in macros"
+  (reset-state!)
+  (define tmp (make-temp-rkt-file "#lang racket/base\n(cond [#t 1] [else 2])\n"))
+  (define output
+    (with-output-to-string
+      (lambda () (start-macro-expander (path->string tmp)))))
+  (define msgs (parse-all-messages output))
+
+  ;; Should NOT have macro:pattern for built-in cond
+  (define pattern-msgs (find-all-messages-by-type msgs "macro:pattern"))
+  (check-equal? (length pattern-msgs) 0
+                "should not emit macro:pattern for built-in macros")
+
+  (with-output-to-string (lambda () (stop-macro-expander)))
+  (delete-file tmp))
+
 (displayln "All macro expander tests passed!")
