@@ -3,9 +3,11 @@
 (require "protocol.rkt")
 
 (provide define-cell
+         make-cell
          cell-ref
          cell-set!
          cell-update!
+         cell-unregister!
          all-cells
          register-all-cells!)
 
@@ -36,6 +38,12 @@
 ;; Update with a function: (cell-update! 'counter add1)
 (define (cell-update! name fn)
   (cell-set! name (fn (cell-ref name))))
+
+;; Remove a cell and notify the frontend
+(define (cell-unregister! name)
+  (hash-remove! cells name)
+  (send-message! (make-message "cell:unregister"
+                               'name (symbol->string name))))
 
 ;; Return the internal hash
 (define (all-cells)

@@ -2,6 +2,7 @@
 
 (require racket/list
          racket/string
+         racket/hash
          "protocol.rkt"
          "cell.rkt")
 
@@ -15,7 +16,14 @@
          extension-descriptor-events
          extension-descriptor-menus
          extension-descriptor-on-activate
-         extension-descriptor-on-deactivate)
+         extension-descriptor-on-deactivate
+         load-extension!
+         load-extension-descriptor!
+         unload-extension!
+         reload-extension!
+         list-extensions
+         get-extension-handler
+         get-extension-layout-contributions)
 
 ;; ── Descriptor struct ────────────────────────────────────────────────────────
 
@@ -119,3 +127,170 @@
       _ext-id _ext-name _ext-cells _ext-panels _ext-events _ext-menus
       _ext-activate new-deactivate
       rest ...)]))
+
+;; ── Extension registry ───────────────────────────────────────────────────────
+
+;; Loaded extensions: symbol id → extension-descriptor
+(define loaded-extensions (make-hasheq))
+
+;; Extension event dispatch table: string "ext-id:event-name" → handler proc
+(define extension-handlers (make-hash))
+
+;; ── Namespacing helpers ──────────────────────────────────────────────────────
+
+;; Prefix a cell name symbol: 'counter → 'my-ext:counter
+(define (prefix-cell-name ext-id cell-name)
+  (string->symbol (format "~a:~a" ext-id cell-name)))
+
+;; Prefix an event name string: "click" → "my-ext:click"
+(define (prefix-event-name ext-id event-name)
+  (format "~a:~a" ext-id event-name))
+
+;; Rewrite cell references in a layout tree:
+;; "cell:counter" → "cell:my-ext:counter"
+(define (rewrite-cell-refs ext-id layout)
+  (cond
+    [(hash? layout)
+     (define new-props
+       (if (hash-has-key? layout 'props)
+           (for/hasheq ([(k v) (in-hash (hash-ref layout 'props (hasheq)))])
+             (values k (rewrite-cell-ref-value ext-id v)))
+           (hasheq)))
+     (define new-children
+       (if (hash-has-key? layout 'children)
+           (for/list ([child (in-list (hash-ref layout 'children '()))])
+             (rewrite-cell-refs ext-id child))
+           '()))
+     (hash-set* layout
+                'props new-props
+                'children new-children)]
+    [else layout]))
+
+(define (rewrite-cell-ref-value ext-id value)
+  (cond
+    [(and (string? value) (string-prefix? value "cell:"))
+     (define cell-name (substring value 5))
+     ;; Don't rewrite if already namespaced
+     (if (string-contains? cell-name ":")
+         value
+         (format "cell:~a:~a" ext-id cell-name))]
+    [else value]))
+
+;; Rewrite on-click event references: "increment" → "my-ext:increment"
+(define (rewrite-event-refs ext-id layout)
+  (cond
+    [(hash? layout)
+     (define props (hash-ref layout 'props (hasheq)))
+     (define new-props
+       (for/hasheq ([(k v) (in-hash props)])
+         (values k
+                 (if (and (eq? k 'on-click) (string? v)
+                          (not (string-contains? v ":")))
+                     (prefix-event-name ext-id v)
+                     v))))
+     (define new-children
+       (for/list ([child (in-list (hash-ref layout 'children '()))])
+         (rewrite-event-refs ext-id child)))
+     (hash-set* layout
+                'props new-props
+                'children new-children)]
+    [else layout]))
+
+;; ── Loading ──────────────────────────────────────────────────────────────────
+
+;; Load from a descriptor object (used in tests and internally)
+(define (load-extension-descriptor! desc)
+  (define id (extension-descriptor-id desc))
+  (define id-str (symbol->string id))
+
+  ;; Register namespaced cells
+  (for ([cell-spec (in-list (extension-descriptor-cells desc))])
+    (define prefixed (prefix-cell-name id (car cell-spec)))
+    (make-cell prefixed (cdr cell-spec))
+    (send-message! (make-message "cell:register"
+                                 'name (symbol->string prefixed)
+                                 'value (cdr cell-spec))))
+
+  ;; Register namespaced event handlers
+  (for ([event-spec (in-list (extension-descriptor-events desc))])
+    (define prefixed (prefix-event-name id-str (hash-ref event-spec 'name)))
+    (hash-set! extension-handlers prefixed (hash-ref event-spec 'handler)))
+
+  ;; Store in registry
+  (hash-set! loaded-extensions id desc)
+
+  ;; Call on-activate
+  (define activate (extension-descriptor-on-activate desc))
+  (when (and activate (procedure? activate))
+    (activate)))
+
+;; Load from a file path (dynamic-require)
+(define (load-extension! path)
+  (define mod-path (if (path? path) path (string->path path)))
+  (define desc (dynamic-require mod-path 'extension #:fail-thunk
+                                (lambda ()
+                                  (error 'load-extension!
+                                         "module at ~a does not provide 'extension"
+                                         path))))
+  (unless (extension-descriptor? desc)
+    (error 'load-extension!
+           "module at ~a: 'extension is not an extension-descriptor" path))
+  (load-extension-descriptor! desc))
+
+;; ── Unloading ────────────────────────────────────────────────────────────────
+
+(define (unload-extension! ext-id)
+  (define desc (hash-ref loaded-extensions ext-id #f))
+  (unless desc
+    (error 'unload-extension! "extension not loaded: ~a" ext-id))
+
+  (define id-str (symbol->string ext-id))
+
+  ;; Call on-deactivate
+  (define deactivate (extension-descriptor-on-deactivate desc))
+  (when (and deactivate (procedure? deactivate))
+    (deactivate))
+
+  ;; Unregister event handlers
+  (for ([event-spec (in-list (extension-descriptor-events desc))])
+    (define prefixed (prefix-event-name id-str (hash-ref event-spec 'name)))
+    (hash-remove! extension-handlers prefixed))
+
+  ;; Unregister cells
+  (for ([cell-spec (in-list (extension-descriptor-cells desc))])
+    (define prefixed (prefix-cell-name ext-id (car cell-spec)))
+    (cell-unregister! prefixed))
+
+  ;; Remove from registry
+  (hash-remove! loaded-extensions ext-id))
+
+;; ── Reload ───────────────────────────────────────────────────────────────────
+
+(define (reload-extension! path)
+  (load-extension! path))
+
+;; ── Queries ──────────────────────────────────────────────────────────────────
+
+(define (list-extensions)
+  (hash-values loaded-extensions))
+
+(define (get-extension-handler event-name)
+  (hash-ref extension-handlers event-name #f))
+
+;; Collect all panel layout contributions from loaded extensions
+(define (get-extension-layout-contributions)
+  (apply append
+         (for/list ([(id desc) (in-hash loaded-extensions)])
+           (define id-str (symbol->string id))
+           (for/list ([panel (in-list (extension-descriptor-panels desc))])
+             (define layout (hash-ref panel 'layout (hasheq)))
+             (define rewritten
+               (rewrite-event-refs id-str
+                 (rewrite-cell-refs id-str layout)))
+             (define panel-id (format "~a:~a" id-str (hash-ref panel 'id "")))
+             (hasheq 'id panel-id
+                     'label (hash-ref panel 'label "Extension")
+                     'tab (hash-ref panel 'tab 'bottom)
+                     'layout (hash-set* rewritten
+                                        'props (hash-set (hash-ref rewritten 'props (hasheq))
+                                                         'data-tab-id panel-id)))))))

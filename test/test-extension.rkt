@@ -108,3 +108,99 @@
   (check-equal? (extension-descriptor-menus minimal-ext) '())
   (check-false (extension-descriptor-on-activate minimal-ext))
   (check-false (extension-descriptor-on-deactivate minimal-ext)))
+
+;; ── Test: Extension loading registers namespaced cells ───────────────────────
+
+(test-case "load-extension! registers namespaced cells"
+  (define-extension loader-test
+    #:name "Loader Test"
+    #:cells ([counter 0] [label "hi"]))
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (load-extension-descriptor! loader-test))))
+  (define msgs (parse-all-messages output))
+  ;; Should have cell:register messages with prefixed names
+  (define registers (find-all-messages-by-type msgs "cell:register"))
+  (check-true (>= (length registers) 2))
+  (define names (map (lambda (m) (hash-ref m 'name "")) registers))
+  (check-not-false (member "loader-test:counter" names))
+  (check-not-false (member "loader-test:label" names))
+  ;; Verify cell values
+  (check-equal? (cell-ref 'loader-test:counter) 0)
+  (check-equal? (cell-ref 'loader-test:label) "hi")
+  ;; Clean up
+  (with-output-to-string
+    (lambda () (unload-extension! 'loader-test))))
+
+(test-case "load-extension! registers namespaced events"
+  (define handler-called #f)
+  (define-extension event-loader-test
+    #:name "Event Loader"
+    #:events ([#:name "click"
+               #:handler (lambda (msg) (set! handler-called #t))]))
+  (with-output-to-string
+    (lambda () (load-extension-descriptor! event-loader-test)))
+  ;; Dispatch the namespaced event
+  (define handler (get-extension-handler "event-loader-test:click"))
+  (check-true (procedure? handler))
+  (handler (hasheq))
+  (check-true handler-called)
+  ;; Clean up
+  (with-output-to-string
+    (lambda () (unload-extension! 'event-loader-test))))
+
+(test-case "unload-extension! removes cells and events"
+  (define-extension unload-test
+    #:name "Unload Test"
+    #:cells ([val 42])
+    #:events ([#:name "act" #:handler (lambda (msg) (void))]))
+  (with-output-to-string
+    (lambda ()
+      (load-extension-descriptor! unload-test)))
+  ;; Verify loaded
+  (check-equal? (cell-ref 'unload-test:val) 42)
+  (check-true (procedure? (get-extension-handler "unload-test:act")))
+  ;; Unload
+  (define output
+    (with-output-to-string
+      (lambda () (unload-extension! 'unload-test))))
+  ;; Verify cell:unregister sent
+  (define msgs (parse-all-messages output))
+  (check-not-false (findf (lambda (m)
+                           (and (string=? (hash-ref m 'type "") "cell:unregister")
+                                (string=? (hash-ref m 'name "") "unload-test:val")))
+                         msgs))
+  ;; Verify event handler removed
+  (check-false (get-extension-handler "unload-test:act")))
+
+(test-case "on-activate called during load, on-deactivate during unload"
+  (define activated #f)
+  (define deactivated #f)
+  (define-extension lifecycle-loader-test
+    #:name "Lifecycle Loader"
+    #:on-activate (lambda () (set! activated #t))
+    #:on-deactivate (lambda () (set! deactivated #t)))
+  (with-output-to-string
+    (lambda () (load-extension-descriptor! lifecycle-loader-test)))
+  (check-true activated)
+  (check-false deactivated)
+  (with-output-to-string
+    (lambda () (unload-extension! 'lifecycle-loader-test)))
+  (check-true deactivated))
+
+(test-case "list-extensions returns loaded extensions"
+  (define-extension list-test-a
+    #:name "Ext A")
+  (define-extension list-test-b
+    #:name "Ext B")
+  (with-output-to-string
+    (lambda ()
+      (load-extension-descriptor! list-test-a)
+      (load-extension-descriptor! list-test-b)))
+  (define exts (list-extensions))
+  (check-true (>= (length exts) 2))
+  (with-output-to-string
+    (lambda ()
+      (unload-extension! 'list-test-a)
+      (unload-extension! 'list-test-b))))
