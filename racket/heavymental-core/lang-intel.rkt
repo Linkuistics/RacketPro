@@ -11,6 +11,7 @@
 (provide analyze-source
          push-intel-to-frontend!
          offset->position
+         offsets->range
          handle-document-opened
          handle-document-changed
          handle-document-closed

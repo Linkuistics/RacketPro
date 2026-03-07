@@ -5,7 +5,8 @@
          racket/set
          racket/string
          "protocol.rkt"
-         "cell.rkt")
+         "cell.rkt"
+         "lang-intel.rkt")
 
 (provide handle-editor-event
          handle-file-result
@@ -33,6 +34,9 @@
          pending-quit?
          set-pending-quit!
          clear-pending-quit!
+         set-pending-goto!
+         pending-goto
+         clear-pending-goto!
          handle-close-request)
 
 ;; ── Accessors for cell state ─────────────────────────────────
@@ -139,6 +143,20 @@
 (define (pending-quit?) _pending-quit)
 (define (set-pending-quit!) (set! _pending-quit #t))
 (define (clear-pending-quit!) (set! _pending-quit #f))
+
+;; ── Pending goto state ───────────────────────────────────────────────
+;; When a file needs to be opened and then jumped to a position,
+;; we queue the goto here. file:read:result handler checks this.
+(define _pending-goto #f)
+
+(define (set-pending-goto! path #:line [line #f] #:col [col #f] #:name [name #f])
+  (set! _pending-goto (hasheq 'path path
+                               'line (or line #f)
+                               'col (or col #f)
+                               'name (or name #f))))
+
+(define (pending-goto) _pending-goto)
+(define (clear-pending-goto!) (set! _pending-goto #f))
 
 ;; ── Window close request handler ───────────────────────────────
 ;; Called when Rust intercepts the window close event.
@@ -281,7 +299,34 @@
      (send-message! (make-message "editor:open"
                                   'path path
                                   'content content
-                                  'language lang))]
+                                  'language lang))
+     ;; Check for pending goto
+     (define pg (pending-goto))
+     (when (and pg (string=? (hash-ref pg 'path "") path))
+       (cond
+         ;; Goto with known line/col (e.g., REPL error jump)
+         [(hash-ref pg 'line #f)
+          (send-message! (make-message "editor:goto"
+                                       'line (hash-ref pg 'line 1)
+                                       'col (hash-ref pg 'col 0)))]
+         ;; Goto with symbol name (cross-file definition) — need check-syntax
+         [(hash-ref pg 'name #f)
+          ;; Analyze the target file to find where the symbol is defined
+          (define name (hash-ref pg 'name))
+          (define result (analyze-source path content))
+          (define defs (hash-ref result 'definitions '()))
+          (define match
+            (for/first ([d (in-list defs)]
+                        #:when (string=? (hash-ref d 'name "") name))
+              d))
+          (when match
+            (define range (offsets->range content
+                                          (hash-ref match 'from 0)
+                                          (hash-ref match 'to 1)))
+            (send-message! (make-message "editor:goto"
+                                         'line (hash-ref range 'startLine 1)
+                                         'col (hash-ref range 'startCol 0))))])
+       (clear-pending-goto!))]
 
     ["file:write:result"
      ;; Rust wrote the file successfully
