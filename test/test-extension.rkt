@@ -253,3 +253,31 @@
   (define id0 (hash-ref (hash-ref (first children) 'props) 'id))
   (define id1 (hash-ref (hash-ref (second children) 'props) 'id))
   (check-not-equal? id0 id1))
+
+;; ── Test: Counter extension loads and works ──────────────────────────────────
+
+(test-case "counter extension: load, increment, unload"
+  (define-extension counter-test
+    #:name "Counter"
+    #:cells ([count 0])
+    #:events ([#:name "increment"
+               #:handler (lambda (msg)
+                           (cell-update! 'counter-test:count add1))]))
+  ;; Load
+  (with-output-to-string
+    (lambda () (load-extension-descriptor! counter-test)))
+  (check-equal? (cell-ref 'counter-test:count) 0)
+  ;; Increment via handler
+  (define handler (get-extension-handler "counter-test:increment"))
+  (check-true (procedure? handler))
+  (with-output-to-string
+    (lambda () (handler (hasheq))))
+  (check-equal? (cell-ref 'counter-test:count) 1)
+  ;; Increment again
+  (with-output-to-string
+    (lambda () (handler (hasheq))))
+  (check-equal? (cell-ref 'counter-test:count) 2)
+  ;; Unload
+  (with-output-to-string
+    (lambda () (unload-extension! 'counter-test)))
+  (check-false (get-extension-handler "counter-test:increment")))
