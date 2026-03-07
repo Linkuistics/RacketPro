@@ -305,4 +305,34 @@
   (with-output-to-string (lambda () (stop-macro-expander)))
   (delete-file tmp))
 
+;; ═══════════════════════════════════════════════════════════════════════════
+;; Test: macro:tree message
+;; ═══════════════════════════════════════════════════════════════════════════
+
+(test-case "start-macro-expander emits macro:tree alongside macro:steps"
+  (reset-state!)
+  (define tmp (make-temp-rkt-file "#lang racket/base\n(cond [#t 1] [else 2])\n"))
+  (define output
+    (with-output-to-string
+      (lambda () (start-macro-expander (path->string tmp)))))
+  (define msgs (parse-all-messages output))
+
+  ;; Should have both macro:steps and macro:tree
+  (check-not-false (find-message-by-type msgs "macro:steps"))
+  (check-not-false (find-message-by-type msgs "macro:tree"))
+
+  (define tree-msg (find-message-by-type msgs "macro:tree"))
+  (define forms (hash-ref tree-msg 'forms))
+  (check-true (list? forms))
+  (check-true (> (length forms) 0))
+
+  ;; Each tree node should have id, label, children
+  (define first-form (car forms))
+  (check-true (hash-has-key? first-form 'id))
+  (check-true (hash-has-key? first-form 'label))
+  (check-true (hash-has-key? first-form 'children))
+
+  (with-output-to-string (lambda () (stop-macro-expander)))
+  (delete-file tmp))
+
 (displayln "All macro expander tests passed!")

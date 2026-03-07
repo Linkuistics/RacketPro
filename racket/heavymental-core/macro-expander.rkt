@@ -5,6 +5,7 @@
          racket/match
          racket/pretty
          racket/string
+         racket/struct
          macro-debugger/model/trace
          macro-debugger/model/reductions
          macro-debugger/model/steps
@@ -18,11 +19,17 @@
 ;; ── State ─────────────────────────────────────────────────
 (define _macro-active #f)
 (define _step-counter 0)
+(define _tree-counter 0)
 
 (define (next-step-id!)
   (begin0
     (format "step-~a" _step-counter)
     (set! _step-counter (add1 _step-counter))))
+
+(define (next-tree-id!)
+  (begin0
+    (format "node-~a" _tree-counter)
+    (set! _tree-counter (add1 _tree-counter))))
 
 ;; ── Syntax utilities ──────────────────────────────────────
 
@@ -80,11 +87,91 @@
           'fociAfter (serialize-foci (state-foci s2))
           'seq (state-seq s1)))
 
+;; ── Tree building from derivation ────────────────────────
+
+;; Check if a value looks like a derivation struct (not syntax, not primitive)
+(define (deriv-like? v)
+  (and v (not (syntax? v)) (not (boolean? v)) (not (number? v))
+       (not (string? v)) (not (void? v)) (not (symbol? v))
+       (not (bytes? v)) (not (char? v)) (not (regexp? v))))
+
+;; Walk a derivation tree and extract macro applications into a simplified tree.
+;; Returns a tree node hash or #f if no macros found.
+(define (deriv->tree d [depth 0])
+  (cond
+    [(not d) #f]
+    [(> depth 50) #f]  ;; safety limit
+    [(mrule? d)
+     (define id (next-tree-id!))
+     (define resolves (base-resolves d))
+     (define macro-name
+       (if (and (pair? resolves) (identifier? (car resolves)))
+           (symbol->string (syntax-e (car resolves)))
+           #f))
+     (define before-str (syntax->string (node-z1 d)))
+     (define label (if (> (string-length before-str) 50)
+                       (string-append (substring before-str 0 50) "...")
+                       before-str))
+     ;; Recurse into the next derivation to find children
+     (define child-trees (collect-child-trees (mrule-next d) (add1 depth)))
+     (hasheq 'id id
+             'macro macro-name
+             'label label
+             'children child-trees)]
+    [else
+     ;; For non-mrule nodes, walk struct fields generically to find nested mrules
+     (define children (collect-child-trees d (add1 depth)))
+     (if (null? children)
+         #f
+         ;; If there's exactly one child, promote it (don't wrap in anonymous node)
+         (if (= (length children) 1)
+             (car children)
+             ;; Multiple macro children at this level — wrap in an anonymous node
+             (let ([id (next-tree-id!)]
+                   [before-str (if (and (node? d) (syntax? (node-z1 d)))
+                                   (let ([s (syntax->string (node-z1 d))])
+                                     (if (> (string-length s) 50)
+                                         (string-append (substring s 0 50) "...")
+                                         s))
+                                   "...")])
+               (hasheq 'id id
+                       'macro #f
+                       'label before-str
+                       'children children))))]))
+
+;; Collect all tree nodes from walking a derivation's struct fields
+(define (collect-child-trees d depth)
+  (cond
+    [(not d) '()]
+    [(> depth 50) '()]
+    [(mrule? d)
+     ;; This is itself a macro — make a tree node
+     (define node (deriv->tree d depth))
+     (if node (list node) '())]
+    [else
+     ;; Walk struct fields
+     (with-handlers ([exn:fail? (lambda (e) '())])
+       (define v (struct->vector d))
+       (apply append
+              (for/list ([i (in-range 1 (vector-length v))])
+                (define val (vector-ref v i))
+                (cond
+                  [(list? val)
+                   (apply append
+                          (for/list ([item val])
+                            (if (deriv-like? item)
+                                (collect-child-trees item (add1 depth))
+                                '())))]
+                  [(deriv-like? val)
+                   (collect-child-trees val (add1 depth))]
+                  [else '()]))))]))
+
 ;; ── Public API ────────────────────────────────────────────
 
 (define (start-macro-expander path #:macro-only? [macro-only? #f])
   (set! _macro-active #t)
   (set! _step-counter 0)
+  (set! _tree-counter 0)
   (cell-set! 'macro-active #t)
 
   (with-handlers ([exn:fail?
@@ -109,28 +196,47 @@
             (reverse acc)
             (loop (cons stx acc)))))
 
-    ;; If no forms, emit empty steps
+    ;; If no forms, emit empty steps and tree
     (when (null? forms)
       (send-message! (make-message "macro:steps" 'steps (list)))
+      (send-message! (make-message "macro:tree" 'forms (list)))
       (cell-set! 'current-bottom-tab "macros"))
 
-    ;; Trace each top-level form and collect rewrite steps
+    ;; Trace each form once — collect both steps and derivations
     (unless (null? forms)
+      (define trace-results
+        (for/list ([form (in-list forms)])
+          (with-handlers ([exn:fail? (lambda (e) (list #f #f))])
+            (parameterize ([current-namespace (make-base-namespace)])
+              (define-values (result deriv) (trace/result form))
+              (list deriv (reductions deriv))))))
+
+      ;; Build flat step list
       (define all-rw-steps
         (apply append
-               (for/list ([form (in-list forms)])
-                 (with-handlers ([exn:fail? (lambda (e) (list))])
-                   (parameterize ([current-namespace (make-base-namespace)])
-                     (define-values (result deriv) (trace/result form))
-                     (define rw-steps (filter rewrite-step? (reductions deriv)))
-                     ;; Apply macro-only filter if requested
-                     (if macro-only?
-                         (filter (lambda (s) (eq? (protostep-type s) 'macro)) rw-steps)
-                         rw-steps))))))
+               (for/list ([tr trace-results])
+                 (define red (cadr tr))
+                 (if red
+                     (let ([rw (filter rewrite-step? red)])
+                       (if macro-only?
+                           (filter (lambda (s) (eq? (protostep-type s) 'macro)) rw)
+                           rw))
+                     '()))))
 
-      ;; Serialize and send
       (define step-jsons (for/list ([s all-rw-steps]) (step->json s)))
       (send-message! (make-message "macro:steps" 'steps step-jsons))
+
+      ;; Build tree from derivations
+      (define tree-forms
+        (filter values
+                (for/list ([tr trace-results])
+                  (define deriv (car tr))
+                  (if deriv
+                      (with-handlers ([exn:fail? (lambda (e) #f)])
+                        (deriv->tree deriv))
+                      #f))))
+      (send-message! (make-message "macro:tree" 'forms tree-forms))
+
       (cell-set! 'current-bottom-tab "macros"))))
 
 (define (stop-macro-expander)
