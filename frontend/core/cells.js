@@ -66,5 +66,13 @@ export function initCells() {
     console.debug(`[cells] updated "${name}" =`, value);
   });
 
+  // cell:unregister — Racket sends this when an extension unloads
+  onMessage('cell:unregister', (msg) => {
+    const { name } = msg;
+    if (!name) return;
+    cells.delete(name);
+    console.debug(`[cells] unregistered "${name}"`);
+  });
+
   console.log('[cells] Cell registry initialised');
 }
