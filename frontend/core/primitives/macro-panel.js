@@ -539,6 +539,42 @@ class HmMacroPanel extends LitElement {
     return this._renderStepDetail();
   }
 
+  // Render text with highlighted foci spans
+  _renderCodeWithFoci(text, foci, highlightClass) {
+    if (!text || !foci || foci.length === 0) {
+      return html`<div class="code-block">${text || '(empty)'}</div>`;
+    }
+
+    // Sort foci by offset ascending, filter valid ones
+    const sorted = [...foci]
+      .filter(f => f.offset != null && f.span != null && f.offset >= 0)
+      .sort((a, b) => a.offset - b.offset);
+
+    if (sorted.length === 0) {
+      return html`<div class="code-block">${text}</div>`;
+    }
+
+    // Build segments: alternating plain text and highlighted spans
+    const parts = [];
+    let pos = 0;
+    for (const f of sorted) {
+      const start = f.offset;
+      const end = Math.min(f.offset + f.span, text.length);
+      if (start > pos) {
+        parts.push(text.substring(pos, start));
+      }
+      if (start < text.length) {
+        parts.push(html`<span class="${highlightClass}">${text.substring(start, end)}</span>`);
+      }
+      pos = end;
+    }
+    if (pos < text.length) {
+      parts.push(text.substring(pos));
+    }
+
+    return html`<div class="code-block">${parts}</div>`;
+  }
+
   _renderStepDetail() {
     const step = this._currentStep;
     if (!step) {
@@ -546,6 +582,9 @@ class HmMacroPanel extends LitElement {
     }
 
     const pattern = this._patterns.get(step.id);
+    // Use original source text for before (with foci highlighting),
+    // fall back to pretty-printed if unavailable
+    const beforeText = step.originalBefore || step.before;
 
     return html`
       <div class="info-row">
@@ -559,7 +598,7 @@ class HmMacroPanel extends LitElement {
 
       <div class="detail-section">
         <div class="detail-label">Before</div>
-        <div class="code-block">${step.before || '(empty)'}</div>
+        ${this._renderCodeWithFoci(beforeText, step.foci, 'focus-highlight')}
       </div>
 
       <div class="detail-section">

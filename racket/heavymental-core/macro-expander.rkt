@@ -66,15 +66,33 @@
     (hasheq 'offset (syntax-position f)
             'span (syntax-span f))))
 
+;; Serialize foci relative to a base position (for highlighting in original source)
+(define (serialize-foci-relative foci-list base-pos)
+  (for/list ([f (in-list foci-list)]
+             #:when (and (syntax-position f) (syntax-span f) base-pos))
+    (hasheq 'offset (- (syntax-position f) base-pos)
+            'span (syntax-span f))))
+
+;; Extract original source text for a syntax object from the file text
+(define (extract-original-source stx source-text)
+  (define pos (syntax-position stx))
+  (define spn (syntax-span stx))
+  (if (and pos spn source-text
+           (<= (sub1 pos) (string-length source-text))
+           (<= (+ (sub1 pos) spn) (string-length source-text)))
+      (substring source-text (sub1 pos) (+ (sub1 pos) spn))
+      #f))
+
 ;; ── Step serialization ───────────────────────────────────
 
-(define (step->json s)
+(define (step->json s source-text)
   (define id (next-step-id!))
   (define type-sym (protostep-type s))
   (define before-stx (step-term1 s))
   (define after-stx (step-term2 s))
   (define s1 (protostep-s1 s))
   (define s2 (step-s2 s))
+  (define before-pos (syntax-position before-stx))
 
   (hasheq 'id id
           'type (symbol->string type-sym)
@@ -82,8 +100,9 @@
           'macro (step-macro-name s)
           'before (syntax->string before-stx)
           'after (syntax->string after-stx)
+          'originalBefore (extract-original-source before-stx source-text)
           'beforeLoc (syntax-loc before-stx)
-          'foci (serialize-foci (state-foci s1))
+          'foci (serialize-foci-relative (state-foci s1) before-pos)
           'fociAfter (serialize-foci (state-foci s2))
           'seq (state-seq s1)))
 
@@ -223,7 +242,7 @@
                            rw))
                      '()))))
 
-      (define step-jsons (for/list ([s all-rw-steps]) (step->json s)))
+      (define step-jsons (for/list ([s all-rw-steps]) (step->json s text)))
       (send-message! (make-message "macro:steps" 'steps step-jsons))
 
       ;; Build tree from derivations
