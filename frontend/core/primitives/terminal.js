@@ -216,6 +216,17 @@ class HmTerminal extends LitElement {
       }
     });
 
+    // pty:created — a new PTY was created for our pty-id; report the
+    // current terminal dimensions so the new process knows its real size.
+    // Without this, a restarted PTY defaults to 80×24 while xterm.js may
+    // be a very different size, causing Racket's xrepl to crash.
+    this._unlistenCreated = await window.__TAURI__.event.listen('pty:created', (event) => {
+      const { id } = event.payload;
+      if (id === this.ptyId) {
+        this._reportResize();
+      }
+    });
+
     // pty:exit — show exit message when PTY process terminates
     this._unlistenExit = await window.__TAURI__.event.listen('pty:exit', (event) => {
       const { id, code } = event.payload;
@@ -278,6 +289,10 @@ class HmTerminal extends LitElement {
     if (this._unlistenOutput) {
       this._unlistenOutput();
       this._unlistenOutput = null;
+    }
+    if (this._unlistenCreated) {
+      this._unlistenCreated();
+      this._unlistenCreated = null;
     }
     if (this._unlistenExit) {
       this._unlistenExit();

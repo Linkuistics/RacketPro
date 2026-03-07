@@ -2,12 +2,19 @@ use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::io::Write;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
+
+/// Monotonically increasing generation counter so reader threads can
+/// detect whether their PTY instance has been replaced by a newer one.
+static GENERATION: AtomicU64 = AtomicU64::new(0);
 
 pub struct PtyInstance {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
+    /// Generation stamp assigned at creation time.
+    generation: u64,
 }
 
 #[derive(Clone)]
@@ -63,6 +70,8 @@ impl PtyManager {
             .take_writer()
             .map_err(|e| format!("Failed to take writer: {}", e))?;
 
+        let gen = GENERATION.fetch_add(1, Ordering::Relaxed);
+
         {
             let mut instances = self.instances.lock().unwrap();
             instances.insert(
@@ -70,6 +79,7 @@ impl PtyManager {
                 PtyInstance {
                     writer,
                     master: pair.master,
+                    generation: gen,
                 },
             );
         }
@@ -117,8 +127,15 @@ impl PtyManager {
                     }
                 }
             }
+            // Only remove the instance if it is still ours (same generation).
+            // A newer create() call may have already replaced it, and we must
+            // not remove the replacement.
             if let Ok(mut instances) = instances_ref.lock() {
-                instances.remove(&pty_id);
+                if let Some(inst) = instances.get(&pty_id) {
+                    if inst.generation == gen {
+                        instances.remove(&pty_id);
+                    }
+                }
             }
         });
 

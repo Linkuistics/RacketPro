@@ -22,6 +22,10 @@
 (define-cell stepper-step 0)
 (define-cell stepper-total -1)
 
+;; Track which REPL generation was active when the last pty:create ran.
+;; Used to ignore pty:exit events from stale (killed) REPL processes.
+(define _last-repl-gen 0)
+
 ;; ── Layout ─────────────────────────────────────────────────
 ;; Zed-like layout:
 ;;   vbox (full height)
@@ -201,7 +205,8 @@
     ;; REPL restart
     [(string=? event-name "repl:restart")
      (cell-set! 'repl-running #f)
-     (restart-repl)]
+     (restart-repl)
+     (set! _last-repl-gen (repl-generation))]
     ;; Completion request
     [(string=? event-name "intel:completion-request")
      (handle-completion-request msg)]
@@ -288,9 +293,13 @@
     ;; Dialog results (e.g., save-before-close confirmation)
     [(string=? typ "dialog:confirm:result")
      (handle-dialog-result msg)]
-    ;; PTY events
+    ;; PTY events — only clear repl-running if the REPL hasn't been
+    ;; restarted since this PTY was created. Each start-repl increments
+    ;; the generation; if it's higher than what we recorded at the last
+    ;; pty:create, this exit is from a stale (killed) REPL.
     [(string=? typ "pty:exit")
-     (cell-set! 'repl-running #f)
+     (when (= _last-repl-gen (repl-generation))
+       (cell-set! 'repl-running #f))
      (handle-repl-event msg)]
     [(string=? typ "ping")
      (send-message! (make-message "pong"))]
@@ -313,6 +322,7 @@
 
 ;; Start REPL PTY
 (start-repl)
+(set! _last-repl-gen (repl-generation))
 
 (send-message! (make-message "lifecycle:ready"))
 (start-message-loop dispatch)

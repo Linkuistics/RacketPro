@@ -16,5 +16,8 @@ node_modules/
 # Tool configs
 .serena/
 
+# Test artifacts
+test/e2e/test-results/
+
 # Worktrees
 .worktrees/

@@ -74,13 +74,14 @@ pub fn start_eval_watcher(handle: tauri::AppHandle) {
                     if code.trim().is_empty() {
                         continue;
                     }
-                    if let Some(window) = handle.get_webview_window("main") {
-                        // Wrap the user code to capture its return value (or error)
-                        // and write it to eval-output.txt via the debug_write command.
-                        let wrapped = format!(
-                            r#"(async function() {{
+                    // Wrap the user code to capture its return value (or error)
+                    // and write it to eval-output.txt via the debug_write command.
+                    let wrapped = format!(
+                        r#"(async function() {{
+    console.log('[eval-watcher-js] IIFE started');
     try {{
         var __result = await (async function() {{ {code} }})();
+        console.log('[eval-watcher-js] code executed, result type:', typeof __result);
         if (__result !== undefined) {{
             window.__TAURI__.core.invoke('debug_write', {{
                 name: 'eval-output.txt',
@@ -95,14 +96,17 @@ pub fn start_eval_watcher(handle: tauri::AppHandle) {
             }});
         }}
     }} catch(e) {{
+        console.log('[eval-watcher-js] error caught:', e.message);
         window.__TAURI__.core.invoke('debug_write', {{
             name: 'eval-output.txt',
             content: 'ERROR: ' + e.message + '\n' + (e.stack || '')
         }});
     }}
 }})()"#
-                        );
+                    );
+                    if let Some(window) = handle.get_webview_window("main") {
                         if let Err(e) = window.eval(&wrapped) {
+                            eprintln!("[eval-watcher] window.eval error: {e}");
                             let _ = fs::write(
                                 Path::new(DEBUG_DIR).join("eval-output.txt"),
                                 format!("RUST_EVAL_ERROR: {e}"),

@@ -1,5 +1,5 @@
 use crate::pty::PtyManager;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -319,6 +319,22 @@ fn handle_intercepted_message(
 
             if let Err(e) = pty.create(id, command, &args, cols, rows, app.clone()) {
                 eprintln!("[bridge]   pty:create FAILED: {e}");
+            } else {
+                // Notify the frontend so the terminal component can report its
+                // current dimensions to the new PTY process.  Without this, a
+                // restarted PTY inherits the default 80×24 size while xterm.js
+                // may be much smaller, causing Racket's xrepl to crash.
+                //
+                // Use run_on_main_thread (dispatch_async) instead of a direct
+                // app.emit() to avoid blocking the bridge reader thread.  The
+                // new PTY's reader thread starts immediately and pumps output
+                // callbacks onto the main thread; a synchronous emit here would
+                // block behind those callbacks on macOS WKWebView.
+                let emit_app = app.clone();
+                let emit_id = id.to_string();
+                let _ = app.run_on_main_thread(move || {
+                    let _ = emit_app.emit("pty:created", json!({ "id": emit_id }));
+                });
             }
             eprintln!("[bridge]   pty:create DONE");
             true

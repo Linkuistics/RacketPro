@@ -120,17 +120,19 @@
   (check-not-false (find-msg "lifecycle:ready" boot-msgs)
                    "Boot should end with lifecycle:ready")
 
-  ;; 7 cell:register messages
+  ;; 12 cell:register messages (7 original + 5 Phase 4: dirty-files, repl-running, stepper-active, stepper-step, stepper-total)
   (define cell-regs (find-msgs "cell:register" boot-msgs))
-  (check-equal? (length cell-regs) 7
-                "Should have 7 cell:register messages")
+  (check-equal? (length cell-regs) 12
+                "Should have 12 cell:register messages")
 
   ;; All expected cells present
   (define cell-names
     (for/list ([m (in-list cell-regs)])
       (hash-ref m 'name)))
   (for ([expected '("current-file" "file-dirty" "title" "status"
-                    "language" "cursor-pos" "project-root")])
+                    "language" "cursor-pos" "project-root"
+                    "dirty-files" "repl-running"
+                    "stepper-active" "stepper-step" "stepper-total")])
     (check-not-false (member expected cell-names)
                      (format "Cell '~a' should be registered" expected)))
 
@@ -474,13 +476,26 @@
                          (string-contains? (msg-ref m 'value "") "Running")))
                   5))
 
-    (define pty-msg (find-msg "pty:write" msgs))
-    (check-not-false pty-msg "Run should produce pty:write")
-    (check-equal? (msg-ref pty-msg 'id) "repl")
-    (check-true (string-contains? (msg-ref pty-msg 'data "") ",enter")
-                "pty:write should contain ,enter command")
-    (check-true (string-contains? (msg-ref pty-msg 'data "") "/tmp/test.rkt")
-                "pty:write should contain the file path")
+    ;; Phase 4 sends two pty:write messages:
+    ;;   1. clear-repl (\x0c form feed)
+    ;;   2. ,enter "path" (the actual run command)
+    (define pty-msgs (find-msgs "pty:write" msgs))
+    (check-true (>= (length pty-msgs) 2)
+                "Run should produce at least 2 pty:write messages (clear + enter)")
+
+    ;; First pty:write is the REPL clear
+    (define clear-msg (first pty-msgs))
+    (check-equal? (msg-ref clear-msg 'id) "repl")
+    (check-equal? (msg-ref clear-msg 'data) "\f"
+                  "First pty:write should be form-feed (clear)")
+
+    ;; Second pty:write is the ,enter command
+    (define enter-msg (second pty-msgs))
+    (check-equal? (msg-ref enter-msg 'id) "repl")
+    (check-true (string-contains? (msg-ref enter-msg 'data "") ",enter")
+                "Second pty:write should contain ,enter command")
+    (check-true (string-contains? (msg-ref enter-msg 'data "") "/tmp/test.rkt")
+                "Second pty:write should contain the file path")
 
     (eprintf "[test 11] Run command OK\n"))
 
@@ -500,6 +515,396 @@
     (check-equal? (msg-ref goto-msg 'col) 10)
 
     (eprintf "[test 12] Editor goto OK\n"))
+
+  (shutdown! proc to-racket))
+
+
+;; ═══════════════════════════════════════════════════════════════════════════
+;; Tests 13–19: Phase 4 features (shared subprocess)
+;; ═══════════════════════════════════════════════════════════════════════════
+
+(let ()
+  (eprintf "[tests 13-19] Spawning main.rkt...\n")
+  (define-values (proc from-racket to-racket) (spawn-main))
+  (read-until from-racket (type=? "lifecycle:ready") 30)
+
+  ;; ── Test 13: dirty-files cell tracks multiple dirty files ──────────
+  (test-case "Test 13: dirty-files cell tracks multiple files"
+    ;; Open a file and mark it dirty
+    (send-json! to-racket
+                (hasheq 'type "file:read:result"
+                        'path "/tmp/a.rkt"
+                        'content "#lang racket\n"))
+    (read-until from-racket (type=? "editor:open") 5)
+
+    ;; editor:dirty produces: dirty-files update, file-dirty update, title update
+    ;; Drain through the title update to avoid leftover messages
+    (send-json! to-racket
+                (hasheq 'type "event" 'name "editor:dirty"
+                        'path "/tmp/a.rkt"))
+    (define msgs-a
+      (read-until from-racket
+                  (lambda (m) (and ((type=? "cell:update") m)
+                                   (equal? (msg-ref m 'name) "title")))
+                  5))
+
+    (define dirty-update-a (find-cell-update "dirty-files" msgs-a))
+    (check-not-false dirty-update-a
+                     "dirty-files cell should update when file marked dirty")
+    (check-not-false (member "/tmp/a.rkt" (msg-ref dirty-update-a 'value '()))
+                     "dirty-files should contain /tmp/a.rkt")
+
+    ;; Open a second file and mark it dirty too
+    (send-json! to-racket
+                (hasheq 'type "file:read:result"
+                        'path "/tmp/b.rkt"
+                        'content "#lang racket\n"))
+    (read-until from-racket (type=? "editor:open") 5)
+
+    ;; Drain through the title update
+    (send-json! to-racket
+                (hasheq 'type "event" 'name "editor:dirty"
+                        'path "/tmp/b.rkt"))
+    (define msgs-b
+      (read-until from-racket
+                  (lambda (m) (and ((type=? "cell:update") m)
+                                   (equal? (msg-ref m 'name) "title")))
+                  5))
+
+    (define dirty-update-b (find-cell-update "dirty-files" msgs-b))
+    (check-not-false dirty-update-b)
+    (define dirty-paths (msg-ref dirty-update-b 'value '()))
+    (check-not-false (member "/tmp/b.rkt" dirty-paths)
+                     "dirty-files should contain /tmp/b.rkt")
+
+    (eprintf "[test 13] dirty-files cell tracking OK\n"))
+
+  ;; ── Test 14: file:write:result clears dirty state ─────────────────
+  (test-case "Test 14: file:write:result clears dirty state"
+    ;; File /tmp/b.rkt is dirty from test 13. Save it.
+    ;; file:write:result produces: current-file, file-dirty, dirty-files, title, status
+    ;; Drain through status to avoid leftover messages
+    (send-json! to-racket
+                (hasheq 'type "file:write:result"
+                        'path "/tmp/b.rkt"))
+    (define msgs
+      (read-until from-racket
+                  (lambda (m) (and ((type=? "cell:update") m)
+                                   (equal? (msg-ref m 'name) "status")
+                                   (string-contains? (msg-ref m 'value "") "Saved")))
+                  5))
+
+    (define dirty-update (find-cell-update "dirty-files" msgs))
+    (check-not-false dirty-update
+                     "dirty-files should update after save")
+    ;; /tmp/b.rkt should no longer be in the dirty list
+    (check-false (member "/tmp/b.rkt" (msg-ref dirty-update 'value '()))
+                 "/tmp/b.rkt should be removed from dirty-files after save")
+
+    ;; file-dirty should be #f
+    (define dirty-bool (find-cell-update "file-dirty" msgs))
+    (check-not-false dirty-bool)
+    (check-equal? (msg-ref dirty-bool 'value) #f
+                  "file-dirty should be #f after save")
+
+    (eprintf "[test 14] file:write:result clears dirty OK\n"))
+
+  ;; ── Test 15: save-before-run (dirty file triggers deferred run) ───
+  (test-case "Test 15: save-before-run defers run until save completes"
+    ;; Open and dirty a file
+    (send-json! to-racket
+                (hasheq 'type "file:read:result"
+                        'path "/tmp/run-test.rkt"
+                        'content "#lang racket\n(+ 1 2)\n"))
+    (read-until from-racket (type=? "editor:open") 5)
+
+    (send-json! to-racket
+                (hasheq 'type "event" 'name "editor:dirty"
+                        'path "/tmp/run-test.rkt"))
+    (read-until from-racket
+                (lambda (m) (and ((type=? "cell:update") m)
+                                 (equal? (msg-ref m 'name) "dirty-files")))
+                5)
+
+    ;; Run while file is dirty — should NOT produce pty:write yet
+    ;; Instead should produce editor:request-save
+    (send-json! to-racket (hasheq 'type "event" 'name "run"))
+    (define msgs-run
+      (read-until from-racket (type=? "editor:request-save") 5))
+
+    (define save-req (find-msg "editor:request-save" msgs-run))
+    (check-not-false save-req
+                     "Run on dirty file should trigger editor:request-save")
+
+    ;; No pty:write yet (the run is deferred)
+    (check-false (find-msg "pty:write" msgs-run)
+                 "Deferred run should NOT produce pty:write before save")
+
+    ;; Now simulate the save completing
+    (send-json! to-racket
+                (hasheq 'type "file:write:result"
+                        'path "/tmp/run-test.rkt"))
+    (define msgs-post-save
+      (read-until from-racket
+                  (lambda (m) (and ((type=? "cell:update") m)
+                                   (equal? (msg-ref m 'name) "status")
+                                   (string-contains? (msg-ref m 'value "") "Running")))
+                  5))
+
+    ;; Now pty:write should appear (clear + enter)
+    (define pty-msgs (find-msgs "pty:write" msgs-post-save))
+    (check-true (>= (length pty-msgs) 2)
+                "Deferred run should produce pty:write after save")
+
+    ;; repl-running should be #t
+    (define repl-update (find-cell-update "repl-running" msgs-post-save))
+    (check-not-false repl-update)
+    (check-equal? (msg-ref repl-update 'value) #t
+                  "repl-running should be #t after run")
+
+    (eprintf "[test 15] save-before-run OK\n"))
+
+  ;; ── Test 16: tab:close-request for clean file closes immediately ──
+  (test-case "Test 16: tab close clean file sends tab:close"
+    ;; Open a clean file
+    (send-json! to-racket
+                (hasheq 'type "file:read:result"
+                        'path "/tmp/clean.rkt"
+                        'content "#lang racket\n"))
+    (read-until from-racket (type=? "editor:open") 5)
+
+    ;; Close request on a clean file — should close immediately
+    (send-json! to-racket
+                (hasheq 'type "event" 'name "tab:close-request"
+                        'path "/tmp/clean.rkt"))
+    (define msgs
+      (read-until from-racket (type=? "tab:close") 5))
+
+    (define close-msg (find-msg "tab:close" msgs))
+    (check-not-false close-msg
+                     "Clean file tab:close-request should produce tab:close")
+    (check-equal? (msg-ref close-msg 'path) "/tmp/clean.rkt")
+
+    (eprintf "[test 16] tab close clean file OK\n"))
+
+  ;; ── Test 17: tab:close-request for dirty file shows dialog ────────
+  (test-case "Test 17: tab close dirty file shows dialog"
+    ;; Open and dirty a file
+    (send-json! to-racket
+                (hasheq 'type "file:read:result"
+                        'path "/tmp/dirty-close.rkt"
+                        'content "#lang racket\n"))
+    (read-until from-racket (type=? "editor:open") 5)
+
+    (send-json! to-racket
+                (hasheq 'type "event" 'name "editor:dirty"
+                        'path "/tmp/dirty-close.rkt"))
+    (read-until from-racket
+                (lambda (m) (and ((type=? "cell:update") m)
+                                 (equal? (msg-ref m 'name) "dirty-files")))
+                5)
+
+    ;; Close request on dirty file — should show dialog
+    (send-json! to-racket
+                (hasheq 'type "event" 'name "tab:close-request"
+                        'path "/tmp/dirty-close.rkt"))
+    (define msgs
+      (read-until from-racket (type=? "dialog:confirm") 5))
+
+    (define dialog-msg (find-msg "dialog:confirm" msgs))
+    (check-not-false dialog-msg
+                     "Dirty file tab:close-request should show dialog")
+    (check-true (string-contains? (msg-ref dialog-msg 'id "") "close:")
+                "Dialog id should start with 'close:'")
+
+    ;; Simulate "Don't Save" response
+    (send-json! to-racket
+                (hasheq 'type "dialog:confirm:result"
+                        'id (msg-ref dialog-msg 'id)
+                        'choice "dont-save"))
+    (define close-msgs
+      (read-until from-racket (type=? "tab:close") 5))
+
+    (define close-msg (find-msg "tab:close" close-msgs))
+    (check-not-false close-msg
+                     "Don't Save should produce tab:close")
+    (check-equal? (msg-ref close-msg 'path) "/tmp/dirty-close.rkt")
+
+    (eprintf "[test 17] tab close dirty file OK\n"))
+
+  ;; ── Test 18: lifecycle:close-request with dirty files ──────────────
+  (test-case "Test 18: lifecycle close with dirty files shows dialog"
+    ;; Open and dirty a file
+    (send-json! to-racket
+                (hasheq 'type "file:read:result"
+                        'path "/tmp/quit-test.rkt"
+                        'content "#lang racket\n"))
+    (read-until from-racket (type=? "editor:open") 5)
+
+    (send-json! to-racket
+                (hasheq 'type "event" 'name "editor:dirty"
+                        'path "/tmp/quit-test.rkt"))
+    (read-until from-racket
+                (lambda (m) (and ((type=? "cell:update") m)
+                                 (equal? (msg-ref m 'name) "dirty-files")))
+                5)
+
+    ;; Window close request — should show dialog
+    (send-json! to-racket
+                (hasheq 'type "lifecycle:close-request"))
+    (define msgs
+      (read-until from-racket (type=? "dialog:confirm") 5))
+
+    (define dialog-msg (find-msg "dialog:confirm" msgs))
+    (check-not-false dialog-msg
+                     "lifecycle:close-request with dirty files should show dialog")
+    (check-equal? (msg-ref dialog-msg 'id) "lifecycle:quit"
+                  "Dialog id should be 'lifecycle:quit'")
+
+    ;; Simulate "Don't Save" response — should quit immediately
+    (send-json! to-racket
+                (hasheq 'type "dialog:confirm:result"
+                        'id "lifecycle:quit"
+                        'choice "dont-save"))
+    (define quit-msgs
+      (read-until from-racket (type=? "lifecycle:quit") 5))
+
+    (define quit-msg (find-msg "lifecycle:quit" quit-msgs))
+    (check-not-false quit-msg
+                     "Don't Save should produce lifecycle:quit")
+
+    (eprintf "[test 18] lifecycle close with dirty files OK\n"))
+
+  ;; ── Test 19: REPL restart ─────────────────────────────────────────
+  (test-case "Test 19: REPL restart"
+    (send-json! to-racket
+                (hasheq 'type "event" 'name "repl:restart"))
+    (define msgs
+      (read-until from-racket
+                  (lambda (m)
+                    (and ((type=? "cell:update") m)
+                         (equal? (msg-ref m 'name) "status")
+                         (equal? (msg-ref m 'value) "REPL started")))
+                  5))
+
+    ;; Should produce pty:kill followed by pty:create
+    (define kill-msg (find-msg "pty:kill" msgs))
+    (check-not-false kill-msg "Restart should produce pty:kill")
+    (check-equal? (msg-ref kill-msg 'id) "repl")
+
+    (define create-msg (find-msg "pty:create" msgs))
+    (check-not-false create-msg "Restart should produce pty:create")
+    (check-equal? (msg-ref create-msg 'id) "repl")
+    (check-equal? (msg-ref create-msg 'command) "racket")
+
+    ;; repl-running should have been set to #f before restart
+    (define repl-off
+      (findf (lambda (m)
+               (and ((type=? "cell:update") m)
+                    (equal? (msg-ref m 'name) "repl-running")
+                    (equal? (msg-ref m 'value) #f)))
+             msgs))
+    (check-not-false repl-off
+                     "repl-running should be set to #f during restart")
+
+    (eprintf "[test 19] REPL restart OK\n"))
+
+  (shutdown! proc to-racket))
+
+
+;; ═══════════════════════════════════════════════════════════════════════════
+;; Tests 20–22: Stepper (separate subprocess — needs filesystem)
+;; ═══════════════════════════════════════════════════════════════════════════
+
+(let ()
+  (eprintf "[tests 20-22] Spawning main.rkt...\n")
+  (define-values (proc from-racket to-racket) (spawn-main))
+  (read-until from-racket (type=? "lifecycle:ready") 30)
+
+  ;; Create a simple test file for the stepper
+  (define stepper-file "/tmp/heavymental-stepper-test.rkt")
+  (call-with-output-file stepper-file
+    (lambda (out) (display "#lang racket\n(define x (+ 1 2))\nx\n" out))
+    #:exists 'replace)
+
+  ;; ── Test 20: Stepper start ─────────────────────────────────────────
+  (test-case "Test 20: Stepper start produces step and activates cells"
+    (send-json! to-racket
+                (hasheq 'type "event" 'name "stepper:start"
+                        'path stepper-file))
+
+    ;; Wait for the first stepper:step message
+    (define msgs
+      (read-until from-racket (type=? "stepper:step") 30))
+
+    ;; stepper-active should be #t
+    (define active-update (find-cell-update "stepper-active" msgs))
+    (check-not-false active-update
+                     "stepper-active cell should be updated")
+    (check-equal? (msg-ref active-update 'value) #t
+                  "stepper-active should be #t after start")
+
+    ;; First step message should arrive
+    (define step-msg (find-msg "stepper:step" msgs))
+    (check-not-false step-msg "Should receive stepper:step")
+    (check-equal? (msg-ref step-msg 'step) 1
+                  "First step should be step 1")
+
+    ;; Step data should be a hash with 'type
+    (define data (msg-ref step-msg 'data))
+    (check-true (hash? data) "Step data should be a hash")
+    (check-true (hash-has-key? data 'type)
+                "Step data should have a 'type field")
+
+    (eprintf "[test 20] Stepper start OK\n"))
+
+  ;; ── Test 21: Stepper forward navigates to next step ────────────────
+  (test-case "Test 21: Stepper forward produces next step"
+    (send-json! to-racket
+                (hasheq 'type "event" 'name "stepper:forward"))
+
+    ;; Wait for the next stepper:step message
+    (define msgs
+      (read-until from-racket (type=? "stepper:step") 30))
+
+    (define step-msg (find-msg "stepper:step" msgs))
+    (check-not-false step-msg "Should receive stepper:step after forward")
+    ;; Step number should be >= 2
+    (check-true (>= (msg-ref step-msg 'step 0) 2)
+                "Step number should be >= 2 after forward")
+
+    ;; stepper-step cell should be updated
+    (define step-update (find-cell-update "stepper-step" msgs))
+    (check-not-false step-update
+                     "stepper-step cell should update on forward")
+
+    (eprintf "[test 21] Stepper forward OK\n"))
+
+  ;; ── Test 22: Stepper stop cleans up ─────────────────────────────────
+  (test-case "Test 22: Stepper stop deactivates"
+    (send-json! to-racket
+                (hasheq 'type "event" 'name "stepper:stop"))
+
+    (define msgs
+      (read-until from-racket (type=? "stepper:finished") 10))
+
+    (define finished-msg (find-msg "stepper:finished" msgs))
+    (check-not-false finished-msg "Should receive stepper:finished on stop")
+    (check-true (>= (msg-ref finished-msg 'total 0) 0)
+                "Total should be >= 0")
+
+    ;; stepper-active should be #f
+    (define active-update (find-cell-update "stepper-active" msgs))
+    (check-not-false active-update
+                     "stepper-active cell should update on stop")
+    (check-equal? (msg-ref active-update 'value) #f
+                  "stepper-active should be #f after stop")
+
+    (eprintf "[test 22] Stepper stop OK\n"))
+
+  ;; Clean up stepper test file
+  (with-handlers ([exn:fail? void])
+    (delete-file stepper-file))
 
   (shutdown! proc to-racket))
 
