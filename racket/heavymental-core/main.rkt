@@ -1,13 +1,15 @@
 #lang racket/base
 
 (require racket/path
+         racket/list
          "protocol.rkt"
          "cell.rkt"
          "editor.rkt"
          "repl.rkt"
          "lang-intel.rkt"
          "stepper.rkt"
-         "macro-expander.rkt")
+         "macro-expander.rkt"
+         "extension.rkt")
 
 ;; ── Cells ──────────────────────────────────────────────────
 (define-cell current-file "")
@@ -135,6 +137,87 @@
                                   'language "cell:language"
                                   'position "cell:cursor-pos")
                    'children (list)))))
+
+;; ── Layout rebuild with extension panels ─────────────────────────
+;; Rebuild and re-send the layout, merging extension panel contributions
+;; into the bottom tabs area.
+(define (rebuild-layout!)
+  (define ext-panels (get-extension-layout-contributions))
+  (define layout (merge-extension-panels initial-layout ext-panels))
+  (send-message! (make-message "layout:set" 'layout layout))
+  (rebuild-menu!))
+
+;; Merge extension panels into the layout tree.
+;; Extension panels with 'tab = 'bottom are added as children of the
+;; bottom-tabs tab-content, and their tab definitions are added to the
+;; bottom-tabs component.
+(define (merge-extension-panels layout ext-panels)
+  (define bottom-panels (filter (lambda (p) (eq? (hash-ref p 'tab 'bottom) 'bottom))
+                                ext-panels))
+  (if (null? bottom-panels)
+      layout
+      (add-bottom-tab-panels layout bottom-panels)))
+
+;; Walk the layout tree and inject extension panels into bottom-tabs
+(define (add-bottom-tab-panels node ext-panels)
+  (define node-type (hash-ref node 'type ""))
+  (cond
+    ;; Found the bottom-tabs: add extension tab definitions
+    [(string=? node-type "bottom-tabs")
+     (define existing-tabs (hash-ref (hash-ref node 'props (hasheq)) 'tabs '()))
+     (define new-tabs
+       (append existing-tabs
+               (for/list ([p (in-list ext-panels)])
+                 (hasheq 'id (hash-ref p 'id "")
+                         'label (hash-ref p 'label "Extension")))))
+     (hash-set node 'props
+               (hash-set (hash-ref node 'props (hasheq)) 'tabs new-tabs))]
+    ;; Found the tab-content: add extension panel layouts as children
+    [(string=? node-type "tab-content")
+     (define existing-children (hash-ref node 'children '()))
+     (define new-children
+       (append existing-children
+               (for/list ([p (in-list ext-panels)])
+                 (hash-ref p 'layout (hasheq)))))
+     (hash-set node 'children new-children)]
+    ;; Otherwise: recurse into children
+    [else
+     (define children (hash-ref node 'children '()))
+     (if (null? children)
+         node
+         (hash-set node 'children
+                   (for/list ([child (in-list children)])
+                     (add-bottom-tab-panels child ext-panels))))]))
+
+;; Rebuild the menu with extension menu items merged in
+(define (rebuild-menu!)
+  (define ext-menus
+    (apply append
+           (for/list ([desc (in-list (list-extensions))])
+             (extension-descriptor-menus desc))))
+  (define merged-menu
+    (if (null? ext-menus)
+        app-menu
+        (merge-extension-menus app-menu ext-menus)))
+  (send-message! (make-message "menu:set" 'menu merged-menu)))
+
+;; Merge extension menu items into the app menu.
+;; Each ext-menu has 'menu (target submenu label) and item fields.
+(define (merge-extension-menus menu ext-menus)
+  (for/list ([submenu (in-list menu)])
+    (define submenu-label (hash-ref submenu 'label ""))
+    (define matching
+      (filter (lambda (em) (string=? (hash-ref em 'menu "") submenu-label))
+              ext-menus))
+    (if (null? matching)
+        submenu
+        (hash-set submenu 'children
+                  (append (hash-ref submenu 'children '())
+                          (list (hasheq 'label "---"))  ;; separator
+                          (for/list ([em (in-list matching)])
+                            (hasheq 'label (hash-ref em 'label "")
+                                    'shortcut (hash-ref em 'shortcut "")
+                                    'action (hash-ref em 'action ""))))))))
 
 ;; ── Menu ───────────────────────────────────────────────────
 (define app-menu
@@ -292,7 +375,11 @@
      (define tab (message-ref msg 'tab "terminal"))
      (cell-set! 'current-bottom-tab tab)]
     [else
-     (eprintf "Unknown event: ~a\n" event-name)]))
+     ;; Check extension dispatch table before logging unknown
+     (define ext-handler (get-extension-handler event-name))
+     (if ext-handler
+         (ext-handler msg)
+         (eprintf "Unknown event: ~a\n" event-name))]))
 
 ;; ── Menu action handler ───────────────────────────────────
 (define (handle-menu-action msg)
@@ -387,6 +474,35 @@
      (when (= _last-repl-gen (repl-generation))
        (cell-set! 'repl-running #f))
      (handle-repl-event msg)]
+    ;; Extension management
+    [(string=? typ "extension:load")
+     (define path (message-ref msg 'path ""))
+     (when (not (string=? path ""))
+       (with-handlers ([exn:fail?
+                        (lambda (e)
+                          (eprintf "Extension load error: ~a\n" (exn-message e))
+                          (cell-set! 'status (format "Extension error: ~a" (exn-message e))))])
+         (load-extension! path)
+         (rebuild-layout!)
+         (cell-set! 'status (format "Loaded extension: ~a" path))))]
+    [(string=? typ "extension:unload")
+     (define ext-id-str (message-ref msg 'id ""))
+     (when (not (string=? ext-id-str ""))
+       (with-handlers ([exn:fail?
+                        (lambda (e)
+                          (eprintf "Extension unload error: ~a\n" (exn-message e)))])
+         (unload-extension! (string->symbol ext-id-str))
+         (rebuild-layout!)
+         (cell-set! 'status (format "Unloaded extension: ~a" ext-id-str))))]
+    [(string=? typ "extension:reload")
+     (define path (message-ref msg 'path ""))
+     (when (not (string=? path ""))
+       (with-handlers ([exn:fail?
+                        (lambda (e)
+                          (eprintf "Extension reload error: ~a\n" (exn-message e)))])
+         (reload-extension! path)
+         (rebuild-layout!)
+         (cell-set! 'status (format "Reloaded extension: ~a" path))))]
     [(string=? typ "ping")
      (send-message! (make-message "pong"))]
     [else
