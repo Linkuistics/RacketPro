@@ -281,3 +281,27 @@
   (with-output-to-string
     (lambda () (unload-extension! 'counter-test)))
   (check-false (get-extension-handler "counter-test:increment")))
+
+;; ── Test: Calc language extension ────────────────────────────────────────────
+
+(test-case "calc-lang extension: eval arithmetic expressions"
+  (define-extension calc-test
+    #:name "Calc"
+    #:cells ([result ""])
+    #:events ([#:name "eval"
+               #:handler (lambda (msg)
+                           (define expr (hash-ref msg 'content "(+ 1 2 3)"))
+                           (define val
+                             (with-handlers ([exn:fail? (lambda (e) "error")])
+                               (format "~a"
+                                 (parameterize ([current-namespace (make-base-namespace)])
+                                   (eval (read (open-input-string expr)))))))
+                           (cell-set! 'calc-test:result val))]))
+  (with-output-to-string
+    (lambda () (load-extension-descriptor! calc-test)))
+  (define handler (get-extension-handler "calc-test:eval"))
+  (with-output-to-string
+    (lambda () (handler (hasheq 'content "(* 6 7)"))))
+  (check-equal? (cell-ref 'calc-test:result) "42")
+  (with-output-to-string
+    (lambda () (unload-extension! 'calc-test))))
