@@ -284,4 +284,25 @@
   (with-output-to-string (lambda () (stop-macro-expander)))
   (delete-file tmp))
 
+;; ═══════════════════════════════════════════════════════════════════════════
+;; Test: macro-only filter
+;; ═══════════════════════════════════════════════════════════════════════════
+
+(test-case "macro-only filter excludes tag and rename steps"
+  (reset-state!)
+  (define tmp (make-temp-rkt-file "#lang racket/base\n(cond [#t 1] [else 2])\n"))
+  (define output
+    (with-output-to-string
+      (lambda () (start-macro-expander (path->string tmp) #:macro-only? #t))))
+  (define msgs (parse-all-messages output))
+  (define steps (hash-ref (find-message-by-type msgs "macro:steps") 'steps))
+
+  ;; All steps should be of type "macro"
+  (for ([s steps])
+    (check-equal? (hash-ref s 'type) "macro"
+                  (format "expected macro, got ~a" (hash-ref s 'type))))
+
+  (with-output-to-string (lambda () (stop-macro-expander)))
+  (delete-file tmp))
+
 (displayln "All macro expander tests passed!")
