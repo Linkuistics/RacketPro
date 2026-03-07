@@ -12,31 +12,28 @@
 
 ;; ── Helpers ──────────────────────────────────────────────────────────────────
 
-;; Parse all JSON messages from a captured output string.
-;; Each message is one newline-terminated JSON object.
 (define (parse-all-messages output)
   (define lines (string-split (string-trim output) "\n"))
   (for/list ([line (in-list lines)]
              #:when (> (string-length (string-trim line)) 0))
     (string->jsexpr line)))
 
-;; Find a message by type in a list of parsed messages.
 (define (find-message-by-type msgs type)
   (findf (lambda (m) (string=? (hash-ref m 'type "") type)) msgs))
 
+(define (find-all-messages-by-type msgs type)
+  (filter (lambda (m) (string=? (hash-ref m 'type "") type)) msgs))
+
 ;; ── Ensure cells exist ──────────────────────────────────────────────────────
-;; The macro-expander uses these cells; they must be registered before use.
 (define-cell macro-active #f)
 (define-cell current-bottom-tab "terminal")
 
-;; Reset cells to known state before each test.
 (define (reset-state!)
   (with-output-to-string
     (lambda ()
       (cell-set! 'macro-active #f)
       (cell-set! 'current-bottom-tab "terminal"))))
 
-;; Create a temporary .rkt file with the given content.
 (define (make-temp-rkt-file content)
   (define tmp (make-temporary-file "macro-test-~a.rkt"))
   (call-with-output-file tmp
@@ -45,59 +42,108 @@
   tmp)
 
 ;; ═══════════════════════════════════════════════════════════════════════════
-;; Test: start-macro-expander with simple macro (cond)
+;; Test: macro:steps message structure
 ;; ═══════════════════════════════════════════════════════════════════════════
 
-(test-case "start-macro-expander produces macro:tree for cond expression"
+(test-case "start-macro-expander emits macro:steps for cond expression"
   (reset-state!)
   (define tmp (make-temp-rkt-file "#lang racket/base\n(cond [#t 1] [else 2])\n"))
   (define output
     (with-output-to-string
-      (lambda ()
-        (start-macro-expander (path->string tmp)))))
+      (lambda () (start-macro-expander (path->string tmp)))))
   (define msgs (parse-all-messages output))
 
-  ;; Should contain a macro:tree message
-  (define tree-msg (find-message-by-type msgs "macro:tree"))
-  (check-not-false tree-msg "macro:tree message should be present")
-  (check-true (list? (hash-ref tree-msg 'forms))
-              "macro:tree should contain a 'forms list")
+  ;; Should contain a macro:steps message
+  (define steps-msg (find-message-by-type msgs "macro:steps"))
+  (check-not-false steps-msg "macro:steps message should be present")
+  (check-true (list? (hash-ref steps-msg 'steps))
+              "macro:steps should contain a 'steps list")
+  (check-true (> (length (hash-ref steps-msg 'steps)) 0)
+              "should have at least one step")
 
   ;; macro-active cell should be #t
   (check-equal? (cell-ref 'macro-active) #t)
   ;; current-bottom-tab should be switched to "macros"
   (check-equal? (cell-ref 'current-bottom-tab) "macros")
 
-  ;; Cleanup
   (with-output-to-string (lambda () (stop-macro-expander)))
   (delete-file tmp))
 
-(test-case "start-macro-expander tree has correct structure"
+(test-case "each step has expected fields"
   (reset-state!)
   (define tmp (make-temp-rkt-file "#lang racket/base\n(cond [#t 1] [else 2])\n"))
   (define output
     (with-output-to-string
-      (lambda ()
-        (start-macro-expander (path->string tmp)))))
+      (lambda () (start-macro-expander (path->string tmp)))))
   (define msgs (parse-all-messages output))
-  (define tree-msg (find-message-by-type msgs "macro:tree"))
-  (check-not-false tree-msg)
+  (define steps-msg (find-message-by-type msgs "macro:steps"))
+  (define steps (hash-ref steps-msg 'steps))
+  (define first-step (car steps))
 
-  ;; Each form in 'forms should be a hash with expected keys
-  (define forms (hash-ref tree-msg 'forms))
-  (check-true (> (length forms) 0) "should have at least one form")
+  ;; Required fields
+  (check-true (hash-has-key? first-step 'id) "step should have 'id")
+  (check-true (hash-has-key? first-step 'type) "step should have 'type")
+  (check-true (hash-has-key? first-step 'typeLabel) "step should have 'typeLabel")
+  (check-true (hash-has-key? first-step 'before) "step should have 'before")
+  (check-true (hash-has-key? first-step 'after) "step should have 'after")
+  (check-true (hash-has-key? first-step 'foci) "step should have 'foci")
+  (check-true (hash-has-key? first-step 'fociAfter) "step should have 'fociAfter")
 
-  (define first-form (car forms))
-  (check-true (hash-has-key? first-form 'id) "node should have 'id")
-  (check-true (hash-has-key? first-form 'before) "node should have 'before")
-  (check-true (hash-has-key? first-form 'children) "node should have 'children")
+  ;; First step for cond should be a macro step
+  (check-equal? (hash-ref first-step 'type) "macro"
+                "first step of cond expansion should be type 'macro'")
 
-  ;; Cleanup
+  ;; 'before' should be a string containing "cond"
+  (check-true (string-contains? (hash-ref first-step 'before) "cond")
+              "before text should contain 'cond'")
+
+  (with-output-to-string (lambda () (stop-macro-expander)))
+  (delete-file tmp))
+
+(test-case "macro steps include macro name"
+  (reset-state!)
+  (define tmp (make-temp-rkt-file "#lang racket/base\n(cond [#t 1] [else 2])\n"))
+  (define output
+    (with-output-to-string
+      (lambda () (start-macro-expander (path->string tmp)))))
+  (define msgs (parse-all-messages output))
+  (define steps (hash-ref (find-message-by-type msgs "macro:steps") 'steps))
+
+  ;; Find a macro-type step
+  (define macro-steps (filter (lambda (s) (string=? (hash-ref s 'type "") "macro")) steps))
+  (check-true (> (length macro-steps) 0) "should have at least one macro step")
+
+  (define first-macro (car macro-steps))
+  (check-true (hash-has-key? first-macro 'macro) "macro step should have 'macro field")
+  (check-true (string? (hash-ref first-macro 'macro)) "macro name should be a string")
+
+  (with-output-to-string (lambda () (stop-macro-expander)))
+  (delete-file tmp))
+
+(test-case "foci contain offset/span pairs"
+  (reset-state!)
+  (define tmp (make-temp-rkt-file "#lang racket/base\n(cond [#t 1] [else 2])\n"))
+  (define output
+    (with-output-to-string
+      (lambda () (start-macro-expander (path->string tmp)))))
+  (define msgs (parse-all-messages output))
+  (define steps (hash-ref (find-message-by-type msgs "macro:steps") 'steps))
+  (define first-step (car steps))
+  (define foci (hash-ref first-step 'foci))
+
+  ;; Foci should be a list
+  (check-true (list? foci) "foci should be a list")
+  ;; Each focus item should have offset and span
+  (when (> (length foci) 0)
+    (define f (car foci))
+    (check-true (hash-has-key? f 'offset) "focus should have 'offset")
+    (check-true (hash-has-key? f 'span) "focus should have 'span"))
+
   (with-output-to-string (lambda () (stop-macro-expander)))
   (delete-file tmp))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
-;; Test: start-macro-expander with simple, non-macro code
+;; Test: non-macro code
 ;; ═══════════════════════════════════════════════════════════════════════════
 
 (test-case "start-macro-expander works with non-macro code"
@@ -105,20 +151,18 @@
   (define tmp (make-temp-rkt-file "#lang racket/base\n(+ 1 2)\n"))
   (define output
     (with-output-to-string
-      (lambda ()
-        (start-macro-expander (path->string tmp)))))
+      (lambda () (start-macro-expander (path->string tmp)))))
   (define msgs (parse-all-messages output))
 
-  ;; Should still produce a macro:tree (with leaf nodes, no macro field)
-  (define tree-msg (find-message-by-type msgs "macro:tree"))
-  (check-not-false tree-msg "macro:tree should be sent even for non-macro code")
+  ;; Should still produce macro:steps (may have tag steps but no macro steps)
+  (define steps-msg (find-message-by-type msgs "macro:steps"))
+  (check-not-false steps-msg "macro:steps should be sent even for non-macro code")
 
-  ;; Cleanup
   (with-output-to-string (lambda () (stop-macro-expander)))
   (delete-file tmp))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
-;; Test: start-macro-expander handles syntax errors gracefully
+;; Test: error handling
 ;; ═══════════════════════════════════════════════════════════════════════════
 
 (test-case "start-macro-expander sends macro:error for syntax errors"
@@ -126,17 +170,13 @@
   (define tmp (make-temp-rkt-file "#lang racket/base\n(define x (+ 1\n"))
   (define output
     (with-output-to-string
-      (lambda ()
-        (start-macro-expander (path->string tmp)))))
+      (lambda () (start-macro-expander (path->string tmp)))))
   (define msgs (parse-all-messages output))
 
-  ;; Should send macro:error, not crash
   (define error-msg (find-message-by-type msgs "macro:error"))
   (check-not-false error-msg "macro:error message should be present for syntax errors")
   (check-true (string? (hash-ref error-msg 'error ""))
               "macro:error should contain an error string")
-
-  ;; After error, macro-active should be reset to #f (stop-macro-expander is called internally)
   (check-equal? (cell-ref 'macro-active) #f)
 
   (delete-file tmp))
@@ -158,7 +198,6 @@
 
 (test-case "stop-macro-expander resets macro-active cell to #f"
   (reset-state!)
-  ;; First start, then stop
   (define tmp (make-temp-rkt-file "#lang racket/base\n(+ 1 2)\n"))
   (with-output-to-string
     (lambda () (start-macro-expander (path->string tmp))))
@@ -196,32 +235,51 @@
         (lambda ()
           (stop-macro-expander))))))
 
-;; ═══════════════════════════════════════════════════════════════════════════
-;; Test: start/stop round-trip
-;; ═══════════════════════════════════════════════════════════════════════════
-
 (test-case "start then stop then start again works correctly"
   (reset-state!)
   (define tmp (make-temp-rkt-file "#lang racket/base\n(when #t 42)\n"))
 
-  ;; First run
   (with-output-to-string
     (lambda () (start-macro-expander (path->string tmp))))
   (check-equal? (cell-ref 'macro-active) #t)
 
-  ;; Stop
   (with-output-to-string
     (lambda () (stop-macro-expander)))
   (check-equal? (cell-ref 'macro-active) #f)
 
-  ;; Second run should work fine
   (define output
     (with-output-to-string
       (lambda () (start-macro-expander (path->string tmp)))))
   (define msgs (parse-all-messages output))
-  (define tree-msg (find-message-by-type msgs "macro:tree"))
-  (check-not-false tree-msg "macro:tree should work on second invocation")
+  (define steps-msg (find-message-by-type msgs "macro:steps"))
+  (check-not-false steps-msg "macro:steps should work on second invocation")
   (check-equal? (cell-ref 'macro-active) #t)
+
+  (with-output-to-string (lambda () (stop-macro-expander)))
+  (delete-file tmp))
+
+;; ═══════════════════════════════════════════════════════════════════════════
+;; Test: step filtering
+;; ═══════════════════════════════════════════════════════════════════════════
+
+(test-case "steps include only rewrite steps by default"
+  (reset-state!)
+  (define tmp (make-temp-rkt-file "#lang racket/base\n(cond [#t 1] [else 2])\n"))
+  (define output
+    (with-output-to-string
+      (lambda () (start-macro-expander (path->string tmp)))))
+  (define msgs (parse-all-messages output))
+  (define steps (hash-ref (find-message-by-type msgs "macro:steps") 'steps))
+
+  ;; All steps should have a valid type (only rewrite step types)
+  (for ([s steps])
+    (check-not-false (member (hash-ref s 'type)
+                             '("macro" "tag-module-begin" "tag-app" "tag-datum"
+                               "tag-top" "finish-block" "finish-expr" "block->letrec"
+                               "splice-block" "splice-module" "splice-lifts"
+                               "splice-end-lifts" "capture-lifts" "provide"
+                               "finish-lsv"))
+                     (format "unexpected step type: ~a" (hash-ref s 'type))))
 
   (with-output-to-string (lambda () (stop-macro-expander)))
   (delete-file tmp))

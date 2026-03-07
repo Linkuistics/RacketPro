@@ -5,7 +5,10 @@
          racket/match
          racket/pretty
          racket/string
-         syntax/parse
+         macro-debugger/model/trace
+         macro-debugger/model/reductions
+         macro-debugger/model/steps
+         macro-debugger/model/deriv
          "protocol.rkt"
          "cell.rkt")
 
@@ -14,144 +17,121 @@
 
 ;; ── State ─────────────────────────────────────────────────
 (define _macro-active #f)
-(define _node-counter 0)
+(define _step-counter 0)
 
-(define (next-node-id!)
-  (set! _node-counter (add1 _node-counter))
-  (format "node-~a" _node-counter))
+(define (next-step-id!)
+  (begin0
+    (format "step-~a" _step-counter)
+    (set! _step-counter (add1 _step-counter))))
 
 ;; ── Syntax utilities ──────────────────────────────────────
 
-;; Pretty-print a syntax object to a string
+;; Pretty-print a syntax object to a compact string
 (define (syntax->string stx)
   (define out (open-output-string))
   (pretty-write (syntax->datum stx) out)
   (string-trim (get-output-string out)))
 
-;; Get the head identifier of a syntax list, if any
-(define (syntax-head stx)
-  (syntax-case stx ()
-    [(head . _) (identifier? #'head) (symbol->string (syntax-e #'head))]
-    [_ #f]))
+;; Extract the macro name from a step by looking at the foci
+;; in the before-state. The first focus is usually the form
+;; whose head is the macro name.
+(define (step-macro-name s)
+  (define foci (state-foci (protostep-s1 s)))
+  (if (and (pair? foci) (syntax? (car foci)))
+      (let ([datum (syntax->datum (car foci))])
+        (if (and (pair? datum) (symbol? (car datum)))
+            (symbol->string (car datum))
+            #f))
+      #f))
 
-;; Check if two syntax objects are identical (no expansion happened).
-;; Also treats (quote X) as unchanged if X equals the original datum,
-;; since expand-once turns literals like #t into '#t.
-(define (syntax-unchanged? before after)
-  (define bd (syntax->datum before))
-  (define ad (syntax->datum after))
-  (or (equal? bd ad)
-      ;; (quote X) where X = original datum is just literal quotation, not a real macro step
-      (and (pair? ad)
-           (eq? (car ad) 'quote)
-           (pair? (cdr ad))
-           (null? (cddr ad))
-           (equal? bd (cadr ad)))))
+;; Serialize a syntax object's position info
+(define (syntax-loc stx)
+  (define pos (syntax-position stx))
+  (define spn (syntax-span stx))
+  (if (and pos spn)
+      (hasheq 'offset pos 'span spn)
+      #f))
 
-;; ── Expansion tree builder ────────────────────────────────
+;; Serialize focus syntax objects as offset/span pairs
+(define (serialize-foci foci-list)
+  (for/list ([f (in-list foci-list)]
+             #:when (and (syntax-position f) (syntax-span f)))
+    (hasheq 'offset (syntax-position f)
+            'span (syntax-span f))))
 
-;; Maximum recursion depth for expansion tracing
-(define MAX-EXPANSION-DEPTH 50)
+;; ── Step serialization ───────────────────────────────────
 
-;; expand-and-trace: recursively expand a syntax object,
-;; building a tree of macro applications.
-;;
-;; Returns: hasheq with keys:
-;;   'id       — unique node id
-;;   'macro    — name of macro applied (or #f if leaf)
-;;   'before   — string of form before expansion
-;;   'after    — string of form after expansion (or #f if leaf)
-;;   'children — list of child nodes
-(define (expand-and-trace stx ns [depth 0])
-  (define id (next-node-id!))
-  (define before-str (syntax->string stx))
+(define (step->json s)
+  (define id (next-step-id!))
+  (define type-sym (protostep-type s))
+  (define before-stx (step-term1 s))
+  (define after-stx (step-term2 s))
+  (define s1 (protostep-s1 s))
+  (define s2 (step-s2 s))
 
-  ;; Bail out if we've recursed too deep
-  (cond
-    [(>= depth MAX-EXPANSION-DEPTH)
-     (hasheq 'id id
-             'macro #f
-             'before before-str
-             'after #f
-             'children (list))]
-    [else
-     ;; Try expand-once
-     (define expanded
-       (with-handlers ([exn:fail? (lambda (e) stx)])
-         (parameterize ([current-namespace ns])
-           (expand-once stx))))
-
-     (cond
-       ;; No expansion happened — leaf node
-       [(syntax-unchanged? stx expanded)
-        (hasheq 'id id
-                'macro #f
-                'before before-str
-                'after #f
-                'children (list))]
-
-       ;; Expansion happened — record it and recurse
-       [else
-        (define macro-name (or (syntax-head stx) "???"))
-        (define after-str (syntax->string expanded))
-
-        ;; Recursively trace the sub-expressions of the expanded form
-        (define children
-          (syntax-case expanded ()
-            [(parts ...)
-             (for/list ([part (in-list (syntax->list #'(parts ...)))])
-               (expand-and-trace part ns (add1 depth)))]
-            [_ (list)]))
-
-        ;; Filter out leaf children with no macro application
-        ;; (keep the tree focused on actual macro steps)
-        (define interesting-children
-          (filter (lambda (c) (or (hash-ref c 'macro #f)
-                                  (not (null? (hash-ref c 'children '())))))
-                  children))
-
-        (hasheq 'id id
-                'macro macro-name
-                'before before-str
-                'after after-str
-                'children interesting-children)])]))
+  (hasheq 'id id
+          'type (symbol->string type-sym)
+          'typeLabel (step-type->string type-sym)
+          'macro (step-macro-name s)
+          'before (syntax->string before-stx)
+          'after (syntax->string after-stx)
+          'beforeLoc (syntax-loc before-stx)
+          'foci (serialize-foci (state-foci s1))
+          'fociAfter (serialize-foci (state-foci s2))
+          'seq (state-seq s1)))
 
 ;; ── Public API ────────────────────────────────────────────
 
-(define (start-macro-expander path)
+(define (start-macro-expander path #:macro-only? [macro-only? #f])
   (set! _macro-active #t)
-  (set! _node-counter 0)
+  (set! _step-counter 0)
   (cell-set! 'macro-active #t)
 
   (with-handlers ([exn:fail?
-                   (lambda (e)
-                     (send-message! (make-message "macro:error"
-                                                  'error (exn-message e)))
-                     (stop-macro-expander))])
-    ;; Read and parse the source file
+                    (lambda (e)
+                      (send-message! (make-message "macro:error"
+                                                   'error (exn-message e)))
+                      (stop-macro-expander))])
+    ;; Read the source file
     (define text (file->string path))
     (define port (open-input-string text))
     (port-count-lines! port)
 
-    ;; Consume #lang line if present — read-language handles #lang
-    ;; and returns a reader function; we just need it to advance the port
+    ;; Skip #lang line by reading it
     (with-handlers ([exn:fail? (lambda (e) (void))])
       (read-language port (lambda () #f)))
 
-    ;; Set up namespace for expansion
-    (define ns (make-base-namespace))
-
-    ;; Read and expand each top-level form
+    ;; Read all remaining forms as syntax
     (define forms
       (let loop ([acc '()])
         (define stx (read-syntax path port))
         (if (eof-object? stx)
             (reverse acc)
-            (loop (cons (expand-and-trace stx ns) acc)))))
+            (loop (cons stx acc)))))
 
-    ;; Send the expansion tree to frontend
-    (send-message! (make-message "macro:tree" 'forms forms))
-    (cell-set! 'current-bottom-tab "macros")))
+    ;; If no forms, emit empty steps
+    (when (null? forms)
+      (send-message! (make-message "macro:steps" 'steps (list)))
+      (cell-set! 'current-bottom-tab "macros"))
+
+    ;; Trace each top-level form and collect rewrite steps
+    (unless (null? forms)
+      (define all-rw-steps
+        (apply append
+               (for/list ([form (in-list forms)])
+                 (with-handlers ([exn:fail? (lambda (e) (list))])
+                   (parameterize ([current-namespace (make-base-namespace)])
+                     (define-values (result deriv) (trace/result form))
+                     (define rw-steps (filter rewrite-step? (reductions deriv)))
+                     ;; Apply macro-only filter if requested
+                     (if macro-only?
+                         (filter (lambda (s) (eq? (protostep-type s) 'macro)) rw-steps)
+                         rw-steps))))))
+
+      ;; Serialize and send
+      (define step-jsons (for/list ([s all-rw-steps]) (step->json s)))
+      (send-message! (make-message "macro:steps" 'steps step-jsons))
+      (cell-set! 'current-bottom-tab "macros"))))
 
 (define (stop-macro-expander)
   (set! _macro-active #f)
