@@ -209,20 +209,20 @@
      (send-message! (make-message "editor:goto"
                                   'line line
                                   'col col))]
-    ;; REPL error → jump to source file
+    ;; REPL error → jump to source file (uses pending-goto for proper sequencing)
     [(string=? event-name "editor:goto-file")
      (define path (message-ref msg 'path ""))
      (define line (message-ref msg 'line 1))
      (define col (message-ref msg 'col 0))
      (when (not (string=? path ""))
-       ;; Open the file in the editor, then jump to position
-       (send-message! (make-message "file:read" 'path path))
-       ;; Queue a goto after the file is opened
-       ;; TODO: proper sequencing — file:read:result triggers editor:set-content,
-       ;; and the goto should happen after that completes.
-       (send-message! (make-message "editor:goto"
-                                    'line line
-                                    'col col)))]
+       (cond
+         ;; If the file is already open, just goto
+         [(string=? path (current-file-path))
+          (send-message! (make-message "editor:goto" 'line line 'col col))]
+         [else
+          ;; Open the file first, then goto after it loads
+          (set-pending-goto! path #:line line #:col col)
+          (send-message! (make-message "file:read" 'path path))]))]
     ;; REPL restart
     [(string=? event-name "repl:restart")
      (cell-set! 'repl-running #f)
