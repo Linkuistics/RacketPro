@@ -4,8 +4,9 @@
 // buttons with a step counter.  The bindings panel shows before/after
 // expressions and variable bindings from the current step.
 //
-// Both components toggle visibility based on the `stepper-active` cell.
-// All effects are deferred with setTimeout to avoid WKWebView deadlock.
+// Visibility is controlled by the parent hm-tab-content via data-tab-id
+// attributes, not by these components themselves.
+// Effects are deferred with setTimeout to avoid WKWebView deadlock.
 
 import { LitElement, html, css } from 'lit';
 import { effect } from '@preact/signals-core';
@@ -28,8 +29,6 @@ class HmStepperToolbar extends LitElement {
       min-height: 28px;
       flex-shrink: 0;
     }
-
-    :host([hidden]) { display: none; }
 
     button {
       display: flex;
@@ -57,18 +56,13 @@ class HmStepperToolbar extends LitElement {
 
   constructor() {
     super();
-    this._disposeEffect = null;
     this._disposeStepEffect = null;
     this._unsubs = [];
   }
 
   firstUpdated() {
     setTimeout(() => {
-      const activeCell = getCell('stepper-active');
       const stepCell = getCell('stepper-step');
-      this._disposeEffect = effect(() => {
-        this.toggleAttribute('hidden', !activeCell.value);
-      });
       this._disposeStepEffect = effect(() => {
         const el = this.shadowRoot?.getElementById('step-num');
         if (el) el.textContent = String(stepCell.value);
@@ -78,7 +72,6 @@ class HmStepperToolbar extends LitElement {
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    if (this._disposeEffect) this._disposeEffect();
     if (this._disposeStepEffect) this._disposeStepEffect();
     for (const u of this._unsubs) u();
   }
@@ -110,8 +103,6 @@ class HmBindingsPanel extends LitElement {
       background: var(--bg-primary, #FFFFFF);
       color: var(--fg-primary, #333333);
     }
-
-    :host([hidden]) { display: none; }
 
     .binding {
       display: flex;
@@ -172,7 +163,6 @@ class HmBindingsPanel extends LitElement {
     this._before = '';
     this._after = '';
     this._unsubs = [];
-    this._disposeEffect = null;
   }
 
   firstUpdated() {
@@ -186,17 +176,11 @@ class HmBindingsPanel extends LitElement {
           this.requestUpdate();
         })
       );
-
-      const activeCell = getCell('stepper-active');
-      this._disposeEffect = effect(() => {
-        this.toggleAttribute('hidden', !activeCell.value);
-      });
     }, 0);
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    if (this._disposeEffect) this._disposeEffect();
     for (const u of this._unsubs) u();
   }
 

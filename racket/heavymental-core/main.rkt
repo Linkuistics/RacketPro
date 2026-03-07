@@ -21,6 +21,7 @@
 (define-cell stepper-active #f)
 (define-cell stepper-step 0)
 (define-cell stepper-total -1)
+(define-cell current-bottom-tab "terminal")
 
 ;; Track which REPL generation was active when the last pty:create ran.
 ;; Used to ignore pty:exit events from stale (killed) REPL processes.
@@ -84,24 +85,44 @@
                                               'props (hasheq 'flex "1")
                                               'children
                                               (list
-                                               (hasheq 'type "panel-header"
-                                                       'props (hasheq 'label "TERMINAL")
+                                               ;; Bottom panel tab bar
+                                               (hasheq 'type "bottom-tabs"
+                                                       'props (hasheq 'tabs
+                                                                      (list (hasheq 'id "terminal" 'label "Terminal")
+                                                                            (hasheq 'id "problems" 'label "Problems")
+                                                                            (hasheq 'id "stepper" 'label "Stepper")
+                                                                            (hasheq 'id "macros" 'label "Macros")))
                                                        'children (list))
-                                               (hasheq 'type "terminal"
-                                                       'props (hasheq 'pty-id "repl")
-                                                       'children (list))
-                                               (hasheq 'type "panel-header"
-                                                       'props (hasheq 'label "PROBLEMS")
-                                                       'children (list))
-                                               (hasheq 'type "error-panel"
+                                               ;; Tab content: only active tab's child is visible
+                                               (hasheq 'type "tab-content"
                                                        'props (hasheq)
-                                                       'children (list))
-                                               (hasheq 'type "stepper-toolbar"
-                                                       'props (hasheq)
-                                                       'children (list))
-                                               (hasheq 'type "bindings-panel"
-                                                       'props (hasheq)
-                                                       'children (list))))))))))
+                                                       'children
+                                                       (list
+                                                        ;; TERMINAL tab
+                                                        (hasheq 'type "terminal"
+                                                                'props (hasheq 'pty-id "repl"
+                                                                               'data-tab-id "terminal")
+                                                                'children (list))
+                                                        ;; PROBLEMS tab
+                                                        (hasheq 'type "error-panel"
+                                                                'props (hasheq 'data-tab-id "problems")
+                                                                'children (list))
+                                                        ;; STEPPER tab (vbox wrapping toolbar + bindings)
+                                                        (hasheq 'type "vbox"
+                                                                'props (hasheq 'data-tab-id "stepper"
+                                                                               'flex "1")
+                                                                'children
+                                                                (list
+                                                                 (hasheq 'type "stepper-toolbar"
+                                                                         'props (hasheq)
+                                                                         'children (list))
+                                                                 (hasheq 'type "bindings-panel"
+                                                                         'props (hasheq)
+                                                                         'children (list))))
+                                                        ;; MACROS tab (placeholder for now)
+                                                        (hasheq 'type "macro-panel"
+                                                                'props (hasheq 'data-tab-id "macros")
+                                                                'children (list))))))))))))
            ;; ── Status bar ──
            (hasheq 'type "statusbar"
                    'props (hasheq 'content "cell:status"
@@ -214,7 +235,8 @@
     [(string=? event-name "stepper:start")
      (define path (message-ref msg 'path (current-file-path)))
      (when (and path (not (string=? path "")) (not (string=? path "untitled.rkt")))
-       (start-stepper path))]
+       (start-stepper path)
+       (cell-set! 'current-bottom-tab "stepper"))]
     [(string=? event-name "stepper:stop")
      (stop-stepper)]
     [(string=? event-name "stepper:forward")
@@ -223,6 +245,10 @@
      (stepper-back)]
     [(string=? event-name "stepper:continue")
      (stepper-continue)]
+    ;; Bottom panel tab selection
+    [(string=? event-name "bottom-tab:select")
+     (define tab (message-ref msg 'tab "terminal"))
+     (cell-set! 'current-bottom-tab tab)]
     [else
      (eprintf "Unknown event: ~a\n" event-name)]))
 
@@ -240,7 +266,8 @@
     [(string=? action "step-through")
      (define path (current-file-path))
      (when (and path (not (string=? path "")) (not (string=? path "untitled.rkt")))
-       (start-stepper path))]
+       (start-stepper path)
+       (cell-set! 'current-bottom-tab "stepper"))]
     [(string=? action "stop-stepper")
      (stop-stepper)]
     [else
