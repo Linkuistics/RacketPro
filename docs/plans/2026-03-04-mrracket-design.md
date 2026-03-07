@@ -191,11 +191,16 @@ Monaco editor component. xterm.js terminal with PTY. File open/save. Basic Racke
 ### Phase 3: Language Intelligence
 racket-langserver integration. Check Syntax arrows. #lang detection. Rhombus syntax highlighting. Error traces. **Demo**: Full Check Syntax, go-to-definition, Rhombus coloring.
 
-### Phase 4: Stepper + Macro Debugger
-Stepper with expression highlighting. Binding/substitution display. Macro expansion viewer. SyntaxSpec pattern visualization. **Demo**: Step through Rhombus, debug SyntaxSpec macros.
+### Phase 4: Stepper + Macro Debugger — COMPLETE
+Stepper with expression highlighting. Binding/substitution display. Macro expansion viewer. `syntax-parse` and `syntax-rules` pattern extraction. Macro debugger rewritten with `macro-debugger/model/*` APIs — structured steps, foci highlighting, tree+stepper dual view, keyboard navigation. Rhombus language support: Monaco providers, language-aware REPL, macro debugger verified working.
+
+**Deferred to Phase 5+** (upstream maturity dependencies):
+- SyntaxSpec pattern visualization — pattern extractor uses S-expression `read`, can't parse shrubbery syntax
+- Rhombus stepper — stepper engine (`stepper/private/model`) uses Racket reduction semantics; guarded with friendly error message
+- SyntaxSpec pattern matching display — macro debugger expands SyntaxSpec macros generically via `trace/result`, but per-pattern visualization requires SyntaxSpec AST introspection
 
 ### Phase 5: DSLs + Extensions (Liveness)
-`#lang mrracket/ui` and `#lang mrracket/component`. Extension API. Live reload of IDE modules. Cell/layout inspector. **Demo**: Write an extension inside MrRacket that adds a panel, live.
+`#lang heavymental/ui` and `#lang heavymental/component`. Extension API. Live reload of IDE modules. Cell/layout inspector. **Demo**: Write an extension inside HeavyMental that adds a panel, live.
 
 ### Phase 6: Polish + Distribution
 Native menus, tray, shortcuts (Racket-driven). Theming. Multi-file projects. Settings. Packaging for macOS.

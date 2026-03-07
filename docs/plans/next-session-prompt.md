@@ -8,45 +8,70 @@ We're building HeavyMental — a Racket-driven IDE on Tauri. Read CLAUDE.md for 
 
 ## What's been completed
 
-**Phases 1-4 are 100% done.** Plus:
-- Bottom panel tabs (TERMINAL | PROBLEMS | STEPPER | MACROS)
-- Cross-file go-to-definition
-- Macro expansion viewer (Phase A): `macro-expander.rkt` + `hm-macro-panel` with tree + detail view
-- 10 macro expander tests, all passing
+**Phases 1–4 are 100% done**, plus all enhancement rounds:
 
-## What we're doing now: Phase B
+- **Phase A** (Quick Wins): Bottom panel tabs, cross-file go-to-definition, macro expansion viewer
+- **Phase B** (Macro Debugger): Full rewrite with `macro-debugger/model/*` APIs — structured steps, foci highlighting, tree+stepper dual view, `syntax-parse` pattern extraction, keyboard navigation
+- **Rhombus Language Support**: Monaco providers for both racket/rhombus, language-aware REPL (`racket -I rhombus`), auto-restart on language switch, stepper guarded with friendly error, macro debugger verified working with Rhombus, `rhombus` package installed
 
-We have a **fully written implementation plan** at `docs/plans/2026-03-07-phase-b-implementation.md` and a **design doc** at `docs/plans/2026-03-07-phase-b-macro-debugger-design.md`. Read both.
+## Current state
 
-**Phase B replaces the hand-rolled `expand-once` engine with Racket's `macro-debugger/model/*` APIs.** This gives us:
-- Structured expansion steps with syntax objects, source locations, and foci (changed sub-expressions)
-- Macro identity (which macro fired, where it's defined)
-- A stepper view alongside the existing tree view
-- Source-level pattern extraction for `syntax-parse` macros
+- 8 test files, all passing: `test-bridge`, `test-phase2`, `test-phase4`, `test-lang-intel`, `test-stepper`, `test-macro-expander`, `test-pattern-extractor`, `test-rhombus`
+- Rhombus is installed (`raco pkg install rhombus`) and `check-syntax` works on `#lang rhombus` files
+- The stepper is Racket-only (guarded with error message for `.rhm` files)
+- Pattern extractor uses S-expression `read` — can't parse shrubbery syntax for Rhombus macros
 
-### The 9 tasks (all defined in the implementation plan)
+## What's remaining to fully close out Phase 4
 
-1. **Rewrite expansion engine** — replace `expand-once` loop with `trace/result` + `reductions`, emit `macro:steps` instead of `macro:tree`
-2. **Add macro-only filter** — `#:macro-only?` keyword on `start-macro-expander`
-3. **Build stepper view frontend** — rewrite `hm-macro-panel` with step list + detail pane + prev/next navigation
-4. **Add tree view toggle** — build tree from derivation, add Tree/Stepper toggle in toolbar
-5. **Add foci highlighting** — highlight changed sub-expressions in before/after code blocks
-6. **Create pattern extractor** — new `pattern-extractor.rkt` module, reads macro source to extract `syntax-parse` patterns
-7. **Wire pattern extractor** — emit `macro:pattern` messages for eligible macro steps
-8. **Keyboard navigation + polish** — arrow keys, scroll-into-view, escape to clear
-9. **Integration test** — run all tests, full manual test, fix edge cases
+Per the original design doc (`docs/plans/2026-03-04-mrracket-design.md`, line 194), Phase 4 targets:
 
-### Key technical context
+> Stepper with expression highlighting. Binding/substitution display. Macro expansion viewer. SyntaxSpec pattern visualization. **Demo**: Step through Rhombus, debug SyntaxSpec macros.
 
-- `macro-debugger/model/trace` → `trace/result` gives derivation tree
-- `macro-debugger/model/reductions` → `reductions` flattens to step list
-- `macro-debugger/model/steps` → `protostep`, `step`, `state` structs with `state-foci`, `step-term1`/`step-term2`
-- `macro-debugger/model/deriv` → `mrule`, `base-resolves` for macro identity
-- All APIs verified working on this system (Racket 9.1)
-- Pattern extraction: source-level parsing of `define-syntax-parse-rule` and `define-syntax-rule` forms
+### Items not yet done:
 
-## How to execute
+1. **SyntaxSpec pattern visualization** — The pattern extractor works for `syntax-parse` and `syntax-rules` macros, but doesn't handle SyntaxSpec patterns yet. SyntaxSpec is a newer macro definition system; need to research its AST/source format and extend `pattern-extractor.rkt`.
 
-Use `superpowers:subagent-driven-development` to execute the implementation plan. Dispatch one subagent per task, review between tasks. The plan has complete code for each step — follow it closely but adapt as needed when the macro-debugger APIs behave differently than expected.
+2. **Demo: "Step through Rhombus"** — Currently guarded with an error. The stepper engine (`stepper/private/model`) uses Racket reduction semantics. Options:
+   - Accept the limitation (Rhombus stepper is a future project)
+   - Or investigate whether the stepper can work with Rhombus's expansion pipeline
 
-Start by reading the implementation plan: `docs/plans/2026-03-07-phase-b-implementation.md`
+3. **Demo: "Debug SyntaxSpec macros"** — The macro debugger works generically via `trace/result`, so SyntaxSpec macros do get expanded. But the *pattern visualization* (showing which pattern matched) doesn't work for SyntaxSpec yet.
+
+### Pragmatic recommendation
+
+Items 2 and 3 depend on upstream Rhombus/SyntaxSpec maturity. A pragmatic Phase 4 close-out would:
+- Document the limitations clearly
+- Ensure error messages are friendly
+- Move SyntaxSpec pattern visualization to Phase 5 (DSLs + Extensions)
+- Mark Phase 4 as complete
+
+## What's next: Phase 5 — DSLs + Extensions (Liveness)
+
+Per the design doc:
+> `#lang heavymental/ui` and `#lang heavymental/component`. Extension API. Live reload of IDE modules. Cell/layout inspector. **Demo**: Write an extension inside HeavyMental that adds a panel, live.
+
+Key decisions to make:
+- Start with `#lang heavymental/ui` DSL or the extension API?
+- Use Racket or Rhombus for the DSL surface?
+- Cell/layout inspector: separate panel or integrated into devtools?
+
+## Key files to read first
+
+| File | Why |
+|------|-----|
+| `CLAUDE.md` | Full architecture + conventions |
+| `docs/plans/2026-03-04-mrracket-design.md` | 6-phase roadmap |
+| `racket/heavymental-core/main.rkt` | Event dispatch, layout, state |
+| `racket/heavymental-core/macro-expander.rkt` | Current macro debugger implementation |
+| `racket/heavymental-core/pattern-extractor.rkt` | Pattern extraction (syntax-parse only) |
+| `frontend/core/primitives/macro-panel.js` | Macro panel UI (tree + stepper views) |
+
+## Test commands
+
+```bash
+# Run all tests
+racket test/test-bridge.rkt && racket test/test-phase2.rkt && racket test/test-phase4.rkt && racket test/test-lang-intel.rkt && racket test/test-stepper.rkt && racket test/test-macro-expander.rkt && racket test/test-pattern-extractor.rkt && racket test/test-rhombus.rkt
+
+# Run the app
+cargo tauri dev
+```
