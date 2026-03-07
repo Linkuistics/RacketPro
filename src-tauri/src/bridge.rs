@@ -1,5 +1,7 @@
 use crate::pty::PtyManager;
+use notify::{self, EventKind, RecursiveMode, Watcher};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,6 +27,70 @@ pub struct RacketBridge {
     app_handle: AppHandle,
     /// PTY manager, needed to process deferred pty:create messages.
     pty_manager: PtyManager,
+    /// Filesystem watcher manager for extension fs:watch support.
+    fs_watcher: FsWatchManager,
+}
+
+/// Manages filesystem watchers for extensions.
+#[derive(Clone)]
+pub struct FsWatchManager {
+    watchers: Arc<Mutex<HashMap<String, notify::RecommendedWatcher>>>,
+}
+
+impl FsWatchManager {
+    pub fn new() -> Self {
+        Self {
+            watchers: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub fn watch(&self, id: &str, path: &str, tx: &mpsc::Sender<Value>) -> Result<(), String> {
+        let tx = tx.clone();
+        let watch_id = id.to_string();
+        let mut watcher = notify::recommended_watcher(
+            move |res: Result<notify::Event, notify::Error>| match res {
+                Ok(event) => {
+                    let kind = match event.kind {
+                        EventKind::Create(_) => "create",
+                        EventKind::Modify(_) => "modify",
+                        EventKind::Remove(_) => "remove",
+                        _ => return,
+                    };
+                    for path in &event.paths {
+                        let msg = json!({
+                            "type": "fs:change",
+                            "watch-id": watch_id,
+                            "event": kind,
+                            "path": path.to_string_lossy(),
+                        });
+                        let _ = tx.send(msg);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[fs-watch] Error: {e}");
+                }
+            },
+        )
+        .map_err(|e| format!("Failed to create watcher: {e}"))?;
+
+        watcher
+            .watch(std::path::Path::new(path), RecursiveMode::Recursive)
+            .map_err(|e| format!("Failed to watch path: {e}"))?;
+
+        self.watchers
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), watcher);
+        Ok(())
+    }
+
+    pub fn unwatch(&self, id: &str) {
+        self.watchers.lock().unwrap().remove(id);
+    }
+
+    pub fn unwatch_all(&self) {
+        self.watchers.lock().unwrap().clear();
+    }
 }
 
 /// Convert a Racket-style shortcut string (e.g. "Cmd+Shift+Z") to a Tauri
@@ -252,8 +318,9 @@ fn process_message(
     app: &AppHandle,
     tx: &mpsc::Sender<Value>,
     pty: &PtyManager,
+    fs_watcher: &FsWatchManager,
 ) {
-    let intercepted = handle_intercepted_message(msg_type, msg, app, tx, pty);
+    let intercepted = handle_intercepted_message(msg_type, msg, app, tx, pty, fs_watcher);
     if !intercepted {
         let event_name = format!("racket:{msg_type}");
         let app_clone = app.clone();
@@ -277,6 +344,7 @@ fn handle_intercepted_message(
     app: &AppHandle,
     tx: &mpsc::Sender<Value>,
     pty: &PtyManager,
+    fs_watcher: &FsWatchManager,
 ) -> bool {
     match msg_type {
         // ----- Menu --------------------------------------------------------
@@ -623,6 +691,25 @@ fn handle_intercepted_message(
             true
         }
 
+        // ----- Filesystem Watching -----------------------------------------
+        "fs:watch" => {
+            let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let path = msg.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            if let Err(e) = fs_watcher.watch(id, path, tx) {
+                log::error!("fs:watch failed: {e}");
+            }
+            true
+        }
+        "fs:unwatch" => {
+            let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            fs_watcher.unwatch(id);
+            true
+        }
+        "fs:unwatch-all" => {
+            fs_watcher.unwatch_all();
+            true
+        }
+
         // Not intercepted — forward to frontend
         _ => false,
     }
@@ -686,11 +773,14 @@ impl RacketBridge {
         let ready = Arc::new(AtomicBool::new(false));
         let pending: Arc<Mutex<Vec<(String, Value)>>> = Arc::new(Mutex::new(Vec::new()));
 
+        let fs_watcher = FsWatchManager::new();
+
         let reader_handle = app_handle.clone();
         let reader_ready = Arc::clone(&ready);
         let reader_pending = Arc::clone(&pending);
         let reader_tx = tx.clone();
         let reader_pty = pty_manager.clone();
+        let reader_fs_watcher = fs_watcher.clone();
         thread::spawn(move || {
             let reader = BufReader::new(stdout);
             for line in reader.lines() {
@@ -727,6 +817,7 @@ impl RacketBridge {
                                     &reader_handle,
                                     &reader_tx,
                                     &reader_pty,
+                                    &reader_fs_watcher,
                                 );
                                 eprintln!("[bridge] processing done: {msg_type}");
                             }
@@ -753,6 +844,7 @@ impl RacketBridge {
             pending,
             app_handle,
             pty_manager,
+            fs_watcher,
         })
     }
 
@@ -784,6 +876,7 @@ impl RacketBridge {
                 &self.app_handle,
                 &self.tx,
                 &self.pty_manager,
+                &self.fs_watcher,
             );
         }
         eprintln!("[bridge] flush_pending complete");
