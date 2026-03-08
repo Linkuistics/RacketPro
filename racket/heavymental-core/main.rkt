@@ -11,7 +11,8 @@
          "macro-expander.rkt"
          "extension.rkt"
          "handler-registry.rkt"
-         "settings.rkt")
+         "settings.rkt"
+         "theme.rkt")
 
 ;; ── Cells ──────────────────────────────────────────────────
 (define-cell current-file "")
@@ -30,6 +31,7 @@
 (define-cell macro-active #f)
 (define-cell _reload-status "")
 (define-cell _extensions-list '())
+(define-cell _current-theme "Light")
 
 ;; Track which REPL generation was active when the last pty:create ran.
 ;; Used to ignore pty:exit events from stale (killed) REPL processes.
@@ -418,6 +420,13 @@
          (rebuild-layout!)
          (update-extensions-list-cell!)
          (cell-set! 'status (format "Unloaded extension: ~a" ext-id-str))))]
+    ;; Theme switching
+    [(string=? event-name "theme:switch")
+     (define theme-name (message-ref msg 'theme "Light"))
+     (apply-theme! theme-name)
+     (cell-set! '_current-theme theme-name)
+     ;; Persist theme choice
+     (settings-set! 'theme theme-name)]
     [else
      ;; Check auto-handlers (from ui macro lambdas), then extension dispatch
      (define auto-handler (get-auto-handler event-name))
@@ -574,7 +583,8 @@
      (apply-loaded-settings! loaded)
      ;; Apply theme from settings
      (define theme-name (settings-ref 'theme "Light"))
-     (send-message! (make-message "event" 'name "theme:switch" 'theme theme-name))]
+     (apply-theme! theme-name)
+     (cell-set! '_current-theme theme-name)]
     [(string=? typ "ping")
      (send-message! (make-message "pong"))]
     [else
@@ -591,6 +601,8 @@
   (eprintf "Project root: ~a\n" dir-str))
 
 (register-all-cells!)
+;; Apply saved theme (defaults to Light if no settings loaded yet)
+(apply-theme! (settings-ref 'theme "Light"))
 (send-message! (make-message "menu:set" 'menu app-menu))
 (send-message! (make-message "layout:set" 'layout (assign-layout-ids initial-layout)))
 
