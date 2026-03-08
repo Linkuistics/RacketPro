@@ -13,7 +13,8 @@
          "handler-registry.rkt"
          "settings.rkt"
          "theme.rkt"
-         "project.rkt")
+         "project.rkt"
+         "keybindings.rkt")
 
 ;; ── Cells ──────────────────────────────────────────────────
 (define-cell current-file "")
@@ -450,6 +451,20 @@
      (cell-set! '_current-theme theme-name)
      ;; Persist theme choice
      (settings-set! 'theme theme-name)]
+    ;; Keybinding: frontend detected a shortcut and resolved it to an action
+    [(string=? event-name "keybinding:action")
+     (define action (message-ref msg 'action ""))
+     (when (not (string=? action ""))
+       ;; Route through the same menu action handler
+       (handle-menu-action (make-message "menu:action" 'action action)))]
+    ;; Keybinding: frontend requests to update a key mapping
+    [(string=? event-name "keybinding:update")
+     (define shortcut (message-ref msg 'shortcut ""))
+     (define action (message-ref msg 'action ""))
+     (when (and (not (string=? shortcut ""))
+                (not (string=? action "")))
+       (keybinding-set! shortcut action)
+       (send-keybindings-to-frontend!))]
     [else
      ;; Check auto-handlers (from ui macro lambdas), then extension dispatch
      (define auto-handler (get-auto-handler event-name))
@@ -628,6 +643,7 @@
   (eprintf "Project root: ~a\n" root))
 
 (register-all-cells!)
+(send-keybindings-to-frontend!)
 ;; Apply saved theme (defaults to Light if no settings loaded yet)
 (apply-theme! (settings-ref 'theme "Light"))
 (send-message! (make-message "menu:set" 'menu app-menu))
