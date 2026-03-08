@@ -8,72 +8,57 @@ We're building HeavyMental — a Racket-driven IDE on Tauri. Read CLAUDE.md for 
 
 ## What's been completed
 
-**Phases 1–5a are 100% done**, plus all enhancement rounds:
+**Phases 1–5b are 100% done**, plus all enhancement rounds:
 
 - **Phase A** (Quick Wins): Bottom panel tabs, cross-file go-to-definition, macro expansion viewer
 - **Phase B** (Macro Debugger): Full rewrite with `macro-debugger/model/*` APIs — structured steps, foci highlighting, tree+stepper dual view, `syntax-parse` pattern extraction, keyboard navigation
 - **Rhombus Language Support**: Monaco providers for both racket/rhombus, language-aware REPL, auto-restart on language switch, macro debugger verified with Rhombus
 - **Phase 5a** (Extension API): `define-extension` macro, extension loader with load/unload/reload, namespaced cells/events, layout ID assignment, ID-based diffing renderer, FS watcher plumbing, 3 demo extensions (counter, calc, file-watcher), full integration tests
+- **Phase 5b** (DSLs & Liveness): `heavymental/ui` embedded macro DSL, `#lang heavymental/extend` reader, `heavymental/component` for custom web components, live reload with `dynamic-rerequire`, extension manager panel (`hm-extension-manager`), lambda handler auto-registration with orphan cleanup, Rust `dialog:open-file` for native file picker, 3 demo extensions (counter-ui, hello-component, timer-extend), frontend component registry
 
 Phase 4 deferred items (upstream maturity): SyntaxSpec pattern visualization, Rhombus stepper, SyntaxSpec per-pattern display.
 
-## What's next: Execute Phase 5b using subagent-driven development
+## What's next: Brainstorm and execute Phase 6 using subagent-driven development
 
-**Use the `superpowers:subagent-driven-development` skill to execute the implementation plan.**
+Phase 6 from the design doc is: **Polish + Distribution** — Native menus, tray, shortcuts (Racket-driven). Theming. Multi-file projects. Settings. Packaging for macOS.
 
-The full implementation plan is at `docs/plans/2026-03-08-phase5b-implementation.md`. Read it first — it has 13 TDD tasks with exact file paths, code, and test commands.
+**Use the `superpowers:brainstorming` skill first** to design Phase 6. Then use `superpowers:writing-plans` to create the implementation plan, and `superpowers:subagent-driven-development` to execute it.
 
-The design doc is at `docs/plans/2026-03-08-phase5b-design.md`.
+### Phase 6 scope (from design doc, needs brainstorming)
 
-### Phase 5b overview (DSLs & Liveness)
+The design doc is intentionally terse. Brainstorming should flesh out:
 
-1. **Live reload** (Tasks 1–2): Auto-watch extension source files, debounced `reload-extension!` on change, error handling that keeps old version on syntax errors
-2. **Extension manager panel** (Tasks 3–6): Rust `dialog:open-file` interception, `_extensions-list` cell, `hm-extension-manager` web component, EXTENSIONS bottom tab
-3. **`heavymental/ui` embedded DSL** (Tasks 7–9): `(ui (vbox (button #:on-click handler)))` macro that builds layout hasheqs, with lambda handler auto-registration and orphan cleanup on layout rebuild
-4. **`#lang heavymental/extend`** (Task 10): Reader module that desugars to `define-extension` macro
-5. **`heavymental/component`** (Tasks 11–12): `define-component` macro + frontend `component:register`/`component:unregister` message handling
-6. **Demo extensions + integration tests** (Task 13): Validate everything end-to-end
+1. **Theming** — Racket-driven theme system? CSS custom properties? Dark/light mode? Extension-provided themes?
+2. **Settings** — Where stored (JSON? Racket config?)? What's configurable? UI for settings panel?
+3. **Multi-file projects** — Project concept? Workspace file? Racket `info.rkt` integration? Find-in-project?
+4. **Keyboard shortcuts** — Already have Racket-driven menus with shortcuts. What's missing? Customizable keybindings?
+5. **Tray** — macOS menu bar integration? What actions?
+6. **Packaging for macOS** — `cargo tauri build` already works. Code signing? DMG? Auto-update?
 
-### Parallelization guide
+### What already exists (avoid reimplementing)
 
-These task groups can run as parallel subagents (separate worktrees):
+- Native menus are **already Racket-driven** (Phase 1) — `menu:set` messages, extension menus merge
+- Keyboard shortcuts already work via menu accelerators
+- `cargo tauri build` already produces a macOS app bundle
+- Extension system is complete (load/unload/reload, manager panel, live reload)
 
-- **Group A** (Tasks 1–2): Live reload — modifies `extension.rkt`, `main.rkt`
-- **Group B** (Tasks 3, 5): Rust dialog + frontend component — modifies `bridge.rs`, creates `extension-manager.js`
-- **Group C** (Tasks 7–8): UI DSL core — creates `ui.rkt`, `handler-registry.rkt`
+### Key files for Phase 6
 
-After Groups A+B+C converge:
-
-- **Group D** (Tasks 4, 6, 9): Wire everything together in `main.rkt`
-- **Group E** (Tasks 10, 11, 12): `#lang heavymental/extend` + custom components
-
-Final:
-
-- **Task 13**: Demo extensions + integration tests
-
-### Key design decisions (from brainstorming)
-
-- **`heavymental/ui` is an embedded macro**, not a `#lang` — so it can be used inline in normal Racket code
-- **Lambda handlers in `ui`**: auto-registered with `_h:N` IDs, arity-checked (0-arg or 1-arg), cleaned up by diffing old vs new layout tree on `rebuild-layout!`
-- **Extension manager dialog is Racket-driven**: Racket sends `dialog:open-file` → Rust opens native picker → `dialog:result` back to Racket
-- **`define-component` template accepts `ui` forms**: same layout DSL everywhere
-- **Handler lifecycle**: no generations/owners — layout tree is the source of truth, orphans detected by set difference
-
-### Racket package structure
-
-Collection name is `"heavymental"` (from `racket/heavymental-core/info.rkt`). So:
-- `heavymental/ui` → `racket/heavymental-core/ui.rkt`
-- `heavymental/component` → `racket/heavymental-core/component.rkt`
-- `heavymental/extend/lang/reader` → `racket/heavymental-core/extend/lang/reader.rkt`
+| Area | Files |
+|------|-------|
+| Menus | `racket/heavymental-core/main.rkt` (menu declarations), `src-tauri/src/bridge.rs` (native menu creation) |
+| Layout | `racket/heavymental-core/main.rkt` (layout tree), `frontend/core/renderer.js` (DOM rendering) |
+| Cells/State | `racket/heavymental-core/cell.rkt`, `frontend/core/bridge.js` (signal mirroring) |
+| Extensions | `racket/heavymental-core/extension.rkt`, `racket/heavymental-core/ui.rkt`, `racket/heavymental-core/component.rkt` |
+| Editor | `racket/heavymental-core/editor.rkt`, `frontend/core/primitives/editor.js` |
+| Styling | `frontend/core/primitives/*.js` (component styles), `frontend/styles.css` (global) |
+| Tauri config | `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` |
 
 ## Test commands
 
 ```bash
-# Run existing tests
-racket test/test-extension.rkt && racket test/test-bridge.rkt && racket test/test-phase2.rkt && racket test/test-phase4.rkt && racket test/test-lang-intel.rkt && racket test/test-stepper.rkt && racket test/test-macro-expander.rkt && racket test/test-pattern-extractor.rkt && racket test/test-rhombus.rkt
-
-# Run new Phase 5b tests (after implementation)
-racket test/test-ui.rkt && racket test/test-component.rkt && racket test/test-extend-lang.rkt && racket test/test-phase5b-integration.rkt
+# Run ALL tests (Phases 1–5b)
+racket test/test-extension.rkt && racket test/test-bridge.rkt && racket test/test-phase2.rkt && racket test/test-phase4.rkt && racket test/test-lang-intel.rkt && racket test/test-stepper.rkt && racket test/test-macro-expander.rkt && racket test/test-pattern-extractor.rkt && racket test/test-rhombus.rkt && racket test/test-ui.rkt && racket test/test-component.rkt && racket test/test-extend-lang.rkt && racket test/test-phase5b-integration.rkt
 
 # Run the app
 cargo tauri dev
