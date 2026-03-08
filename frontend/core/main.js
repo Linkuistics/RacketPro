@@ -7,6 +7,7 @@ import { initBridge, signalReady, onMessage } from './bridge.js';
 import { initCells } from './cells.js';
 import { initRenderer } from './renderer.js';
 import { initComponentRegistry } from './component-registry.js';
+import { initTheme } from './theme.js';
 import './primitives/layout.js';
 import './primitives/content.js';
 import './primitives/input.js';
@@ -42,6 +43,8 @@ async function boot() {
   console.log('[boot] 4/5 renderer initialised');
   initComponentRegistry();
   console.log('[boot] 4.5/5 component registry initialised');
+  initTheme();
+  console.log('[boot] 4.6/5 theme system initialised');
   onMessage('lifecycle:ready', () => console.log('[boot] Racket core is ready'));
 
   // Phase 3: Signal ready — now that all listeners are registered, tell
