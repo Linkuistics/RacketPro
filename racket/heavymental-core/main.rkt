@@ -12,7 +12,8 @@
          "extension.rkt"
          "handler-registry.rkt"
          "settings.rkt"
-         "theme.rkt")
+         "theme.rkt"
+         "project.rkt")
 
 ;; ── Cells ──────────────────────────────────────────────────
 (define-cell current-file "")
@@ -32,6 +33,7 @@
 (define-cell _reload-status "")
 (define-cell _extensions-list '())
 (define-cell _current-theme "Light")
+(define-cell _project-name "")
 
 ;; Track which REPL generation was active when the last pty:create ran.
 ;; Used to ignore pty:exit events from stale (killed) REPL processes.
@@ -592,13 +594,14 @@
 
 ;; ── Startup sequence ───────────────────────────────────────
 
-;; Derive project root from the script's location (up 2 levels from main.rkt)
+;; Derive project root by walking up from the script's location looking for info.rkt
 (let ()
   (define run-path (find-system-path 'run-file))
   (define dir (simplify-path (build-path run-path 'up 'up 'up)))
-  (define dir-str (path->string dir))
-  (cell-set! 'project-root dir-str)
-  (eprintf "Project root: ~a\n" dir-str))
+  (define root (find-project-root (path->string dir)))
+  (cell-set! 'project-root root)
+  (cell-set! '_project-name (project-collection-name root))
+  (eprintf "Project root: ~a\n" root))
 
 (register-all-cells!)
 ;; Apply saved theme (defaults to Light if no settings loaded yet)
