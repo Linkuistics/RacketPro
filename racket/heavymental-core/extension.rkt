@@ -143,7 +143,7 @@
 (define extension-handlers (make-hash))
 
 ;; Extension source paths: symbol id → path string (for live reload)
-(define extension-source-paths (make-hash))
+(define extension-source-paths (make-hasheq))
 
 ;; ── Namespacing helpers ──────────────────────────────────────────────────────
 
