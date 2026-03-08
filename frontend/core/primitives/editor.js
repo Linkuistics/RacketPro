@@ -73,6 +73,7 @@ class HmEditor extends LitElement {
     language:  { type: String },
     theme:     { type: String },
     readOnly:  { type: Boolean, attribute: 'read-only' },
+    vimMode:   { type: Boolean, state: true },
   };
 
   static styles = css`
@@ -92,6 +93,23 @@ class HmEditor extends LitElement {
     #editor-container {
       width: 100%;
       height: 100%;
+    }
+
+    .vim-status {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 20px;
+      background: var(--bg-statusbar, #e8e8e8);
+      color: var(--fg-statusbar, #616161);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 2px 8px;
+      display: none;
+    }
+    :host([vim-mode]) .vim-status {
+      display: block;
     }
   `;
 
@@ -120,6 +138,10 @@ class HmEditor extends LitElement {
     this._arrowOverlay = null;
     /** @type {string[]} Monaco decoration IDs for stepper highlighting. */
     this._stepperDecorations = [];
+    /** @type {boolean} Whether vim mode is enabled. */
+    this.vimMode = false;
+    /** @type {{dispose(): void}|null} Active vim mode instance. */
+    this._vimMode = null;
   }
 
   render() {
@@ -363,6 +385,48 @@ class HmEditor extends LitElement {
         }
       })
     );
+
+    // Vim mode toggle
+    this._unsubs.push(
+      onMessage('editor:set-vim-mode', (msg) => {
+        this.vimMode = msg.enabled;
+        if (this._editor) {
+          if (this.vimMode) {
+            this._enableVim();
+          } else {
+            this._disableVim();
+          }
+        }
+      })
+    );
+  }
+
+  async _enableVim() {
+    if (this._vimMode) return;
+    try {
+      const { initVimMode } = await import('../../vendor/monaco-vim/index.js');
+      // Create a status bar element for vim mode indicator
+      let statusEl = this.shadowRoot.querySelector('.vim-status');
+      if (!statusEl) {
+        statusEl = document.createElement('div');
+        statusEl.className = 'vim-status';
+        this.shadowRoot.appendChild(statusEl);
+      }
+      this._vimMode = initVimMode(this._editor, statusEl);
+      this.toggleAttribute('vim-mode', true);
+    } catch (e) {
+      console.error('[editor] Failed to enable vim mode:', e);
+    }
+  }
+
+  _disableVim() {
+    if (this._vimMode) {
+      this._vimMode.dispose();
+      this._vimMode = null;
+      const statusEl = this.shadowRoot.querySelector('.vim-status');
+      if (statusEl) statusEl.textContent = '';
+      this.toggleAttribute('vim-mode', false);
+    }
   }
 
   disconnectedCallback() {
@@ -383,6 +447,9 @@ class HmEditor extends LitElement {
       clearTimeout(this._changeTimer);
       this._changeTimer = null;
     }
+
+    // Dispose vim mode (before editor disposal — vim may reference editor)
+    this._disableVim();
 
     // Dispose Monaco resources
     if (this._changeDisposable) {
