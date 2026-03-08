@@ -8,7 +8,7 @@ We're building HeavyMental — a Racket-driven IDE on Tauri. Read CLAUDE.md for 
 
 ## What's been completed
 
-**Phases 1–4 are 100% done**, plus all enhancement rounds:
+**Phases 1–5a are 100% done**, plus all enhancement rounds:
 
 - **Phase A** (Quick Wins): Bottom panel tabs, cross-file go-to-definition, macro expansion viewer
 - **Phase B** (Macro Debugger): Full rewrite with `macro-debugger/model/*` APIs — structured steps, foci highlighting, tree+stepper dual view, `syntax-parse` pattern extraction, keyboard navigation
@@ -17,42 +17,63 @@ We're building HeavyMental — a Racket-driven IDE on Tauri. Read CLAUDE.md for 
 
 Phase 4 deferred items (upstream maturity): SyntaxSpec pattern visualization, Rhombus stepper, SyntaxSpec per-pattern display.
 
-## What's next: Phase 5b — DSLs & Liveness
+## What's next: Execute Phase 5b using subagent-driven development
 
-Phase 5b focuses on:
-- `#lang heavymental/ui` — DSL for declaring UI layouts in Racket
-- `#lang heavymental/component` — DSL for defining custom Web Components from Racket
-- `#lang heavymental/extend` — DSL for writing extensions with less boilerplate
-- Live reload: watch extension files and auto-reload on save
-- Extension manager panel (list/load/unload extensions from the IDE)
+**Use the `superpowers:subagent-driven-development` skill to execute the implementation plan.**
 
-### Design considerations
+The full implementation plan is at `docs/plans/2026-03-08-phase5b-implementation.md`. Read it first — it has 13 TDD tasks with exact file paths, code, and test commands.
 
-- Core libraries in stable Racket, surface DSLs can use Rhombus/SyntaxSpec
-- Extension file watcher Rust plumbing is already in place (notify crate)
-- Layout diffing renderer preserves DOM state during reloads
-- Extensions currently bottom-tab-only; generalize to arbitrary layout positions
+The design doc is at `docs/plans/2026-03-08-phase5b-design.md`.
 
-### Key files for Phase 5b
+### Phase 5b overview (DSLs & Liveness)
 
-| File | Role |
-|------|------|
-| `CLAUDE.md` | Full architecture + conventions |
-| `docs/plans/2026-03-08-phase5-extensions-design.md` | Phase 5 design (covers 5a+5b) |
-| `racket/heavymental-core/extension.rkt` | Extension API: descriptor, loader, FS watcher |
-| `racket/heavymental-core/main.rkt` | Event dispatch, layout merging, rebuild-layout! |
-| `frontend/core/renderer.js` | ID-based diffing renderer |
-| `frontend/core/cells.js` | Cell registry with unregister support |
-| `src-tauri/src/bridge.rs` | Rust bridge with FS watcher (notify crate) |
-| `extensions/counter.rkt` | Demo: counter panel |
-| `extensions/calc-lang.rkt` | Demo: calc language with menu |
-| `extensions/file-watcher.rkt` | Demo: FS watcher with lifecycle hooks |
+1. **Live reload** (Tasks 1–2): Auto-watch extension source files, debounced `reload-extension!` on change, error handling that keeps old version on syntax errors
+2. **Extension manager panel** (Tasks 3–6): Rust `dialog:open-file` interception, `_extensions-list` cell, `hm-extension-manager` web component, EXTENSIONS bottom tab
+3. **`heavymental/ui` embedded DSL** (Tasks 7–9): `(ui (vbox (button #:on-click handler)))` macro that builds layout hasheqs, with lambda handler auto-registration and orphan cleanup on layout rebuild
+4. **`#lang heavymental/extend`** (Task 10): Reader module that desugars to `define-extension` macro
+5. **`heavymental/component`** (Tasks 11–12): `define-component` macro + frontend `component:register`/`component:unregister` message handling
+6. **Demo extensions + integration tests** (Task 13): Validate everything end-to-end
+
+### Parallelization guide
+
+These task groups can run as parallel subagents (separate worktrees):
+
+- **Group A** (Tasks 1–2): Live reload — modifies `extension.rkt`, `main.rkt`
+- **Group B** (Tasks 3, 5): Rust dialog + frontend component — modifies `bridge.rs`, creates `extension-manager.js`
+- **Group C** (Tasks 7–8): UI DSL core — creates `ui.rkt`, `handler-registry.rkt`
+
+After Groups A+B+C converge:
+
+- **Group D** (Tasks 4, 6, 9): Wire everything together in `main.rkt`
+- **Group E** (Tasks 10, 11, 12): `#lang heavymental/extend` + custom components
+
+Final:
+
+- **Task 13**: Demo extensions + integration tests
+
+### Key design decisions (from brainstorming)
+
+- **`heavymental/ui` is an embedded macro**, not a `#lang` — so it can be used inline in normal Racket code
+- **Lambda handlers in `ui`**: auto-registered with `_h:N` IDs, arity-checked (0-arg or 1-arg), cleaned up by diffing old vs new layout tree on `rebuild-layout!`
+- **Extension manager dialog is Racket-driven**: Racket sends `dialog:open-file` → Rust opens native picker → `dialog:result` back to Racket
+- **`define-component` template accepts `ui` forms**: same layout DSL everywhere
+- **Handler lifecycle**: no generations/owners — layout tree is the source of truth, orphans detected by set difference
+
+### Racket package structure
+
+Collection name is `"heavymental"` (from `racket/heavymental-core/info.rkt`). So:
+- `heavymental/ui` → `racket/heavymental-core/ui.rkt`
+- `heavymental/component` → `racket/heavymental-core/component.rkt`
+- `heavymental/extend/lang/reader` → `racket/heavymental-core/extend/lang/reader.rkt`
 
 ## Test commands
 
 ```bash
-# Run all tests
+# Run existing tests
 racket test/test-extension.rkt && racket test/test-bridge.rkt && racket test/test-phase2.rkt && racket test/test-phase4.rkt && racket test/test-lang-intel.rkt && racket test/test-stepper.rkt && racket test/test-macro-expander.rkt && racket test/test-pattern-extractor.rkt && racket test/test-rhombus.rkt
+
+# Run new Phase 5b tests (after implementation)
+racket test/test-ui.rkt && racket test/test-component.rkt && racket test/test-extend-lang.rkt && racket test/test-phase5b-integration.rkt
 
 # Run the app
 cargo tauri dev
