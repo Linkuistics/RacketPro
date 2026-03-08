@@ -30,6 +30,7 @@
          assign-layout-ids
          get-extension-source-path
          find-extension-by-path
+         extensions-list-snapshot
          reset-extensions!
          watch-directory!
          unwatch-all!
@@ -321,6 +322,15 @@
 ;; Expose loaded-extensions hash (for testing / inspection)
 (define (list-extensions-hash)
   loaded-extensions)
+
+;; Return a JSON-serializable snapshot of all loaded extensions.
+;; Each entry is a hasheq with 'id, 'name, 'path, and 'status.
+(define (extensions-list-snapshot)
+  (for/list ([(id desc) (in-hash loaded-extensions)])
+    (hasheq 'id (symbol->string id)
+            'name (extension-descriptor-name desc)
+            'path (or (get-extension-source-path id) "")
+            'status "active")))
 
 ;; Find which extension ID corresponds to a source path (or #f)
 (define (find-extension-by-path path)

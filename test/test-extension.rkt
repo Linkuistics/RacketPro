@@ -508,3 +508,43 @@
   (check-false (find-extension-by-path "/tmp/unknown.rkt"))
   (with-output-to-string
     (lambda () (unload-extension! 'path-ext))))
+
+;; ── Test: extensions-list-snapshot ───────────────────────────────────────────
+
+(test-case "extensions-list-snapshot returns list of extension info"
+  (reset-extensions!)
+  (define test-desc
+    (extension-descriptor
+     'snap-ext "Snapshot Ext" '() '() '() '() #f #f))
+  (with-output-to-string
+    (lambda ()
+      (load-extension-descriptor! test-desc "/tmp/snap.rkt")))
+  (define snapshot (extensions-list-snapshot))
+  (check-equal? (length snapshot) 1)
+  (define entry (car snapshot))
+  (check-equal? (hash-ref entry 'id) "snap-ext")
+  (check-equal? (hash-ref entry 'name) "Snapshot Ext")
+  (check-equal? (hash-ref entry 'path) "/tmp/snap.rkt")
+  (check-equal? (hash-ref entry 'status) "active")
+  (with-output-to-string
+    (lambda () (unload-extension! 'snap-ext))))
+
+(test-case "extensions-list-snapshot returns empty list when no extensions"
+  (reset-extensions!)
+  (define snapshot (extensions-list-snapshot))
+  (check-equal? (length snapshot) 0))
+
+(test-case "extensions-list-snapshot uses empty string for missing path"
+  (reset-extensions!)
+  (define test-desc
+    (extension-descriptor
+     'no-path-snap "No Path Snap" '() '() '() '() #f #f))
+  (with-output-to-string
+    (lambda ()
+      (load-extension-descriptor! test-desc)))
+  (define snapshot (extensions-list-snapshot))
+  (check-equal? (length snapshot) 1)
+  (define entry (car snapshot))
+  (check-equal? (hash-ref entry 'path) "")
+  (with-output-to-string
+    (lambda () (unload-extension! 'no-path-snap))))

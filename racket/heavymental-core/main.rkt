@@ -27,6 +27,7 @@
 (define-cell current-bottom-tab "terminal")
 (define-cell macro-active #f)
 (define-cell _reload-status "")
+(define-cell _extensions-list '())
 
 ;; Track which REPL generation was active when the last pty:create ran.
 ;; Used to ignore pty:exit events from stale (killed) REPL processes.
@@ -220,6 +221,12 @@
                                     'shortcut (hash-ref em 'shortcut "")
                                     'action (hash-ref em 'action ""))))))))
 
+;; ── Extension list cell updater ────────────────────────────
+;; Call after any extension load/unload/reload to keep the
+;; _extensions-list cell in sync with loaded extensions.
+(define (update-extensions-list-cell!)
+  (cell-set! '_extensions-list (extensions-list-snapshot)))
+
 ;; ── Menu ───────────────────────────────────────────────────
 (define app-menu
   (list
@@ -375,6 +382,22 @@
     [(string=? event-name "bottom-tab:select")
      (define tab (message-ref msg 'tab "terminal"))
      (cell-set! 'current-bottom-tab tab)]
+    ;; Extension manager: open file dialog to load an extension
+    [(string=? event-name "extension:load-dialog")
+     (send-message! (make-message "dialog:open-file"
+                                  'filterName "Racket files"
+                                  'filterExtension "rkt"))]
+    ;; Extension manager: unload an extension by ID
+    [(string=? event-name "extension:unload-request")
+     (define ext-id-str (message-ref msg 'id ""))
+     (when (not (string=? ext-id-str ""))
+       (with-handlers ([exn:fail?
+                        (lambda (e)
+                          (eprintf "Extension unload error: ~a\n" (exn-message e)))])
+         (unload-extension! (string->symbol ext-id-str))
+         (rebuild-layout!)
+         (update-extensions-list-cell!)
+         (cell-set! 'status (format "Unloaded extension: ~a" ext-id-str))))]
     [else
      ;; Check extension dispatch table before logging unknown
      (define ext-handler (get-extension-handler event-name))
@@ -485,6 +508,7 @@
                           (cell-set! 'status (format "Extension error: ~a" (exn-message e))))])
          (load-extension! path)
          (rebuild-layout!)
+         (update-extensions-list-cell!)
          (cell-set! 'status (format "Loaded extension: ~a" path))))]
     [(string=? typ "extension:unload")
      (define ext-id-str (message-ref msg 'id ""))
@@ -494,6 +518,7 @@
                           (eprintf "Extension unload error: ~a\n" (exn-message e)))])
          (unload-extension! (string->symbol ext-id-str))
          (rebuild-layout!)
+         (update-extensions-list-cell!)
          (cell-set! 'status (format "Unloaded extension: ~a" ext-id-str))))]
     [(string=? typ "extension:reload")
      (define path (message-ref msg 'path ""))
@@ -503,7 +528,21 @@
                           (eprintf "Extension reload error: ~a\n" (exn-message e)))])
          (reload-extension! path)
          (rebuild-layout!)
+         (update-extensions-list-cell!)
          (cell-set! 'status (format "Reloaded extension: ~a" path))))]
+    ;; Dialog result: file picker returned a path (e.g. for extension loading)
+    [(string=? typ "dialog:result")
+     (define path (message-ref msg 'path #f))
+     (when (and path (not (equal? path 'null)) (not (equal? path "null"))
+                (string? path) (not (string=? path "")))
+       (with-handlers ([exn:fail?
+                        (lambda (e)
+                          (eprintf "Extension load error: ~a\n" (exn-message e))
+                          (cell-set! 'status (format "Extension error: ~a" (exn-message e))))])
+         (load-extension! path)
+         (rebuild-layout!)
+         (update-extensions-list-cell!)
+         (cell-set! 'status (format "Loaded extension: ~a" path))))]
     [(string=? typ "fs:change")
      (handle-fs-change msg)]
     [(string=? typ "ping")
