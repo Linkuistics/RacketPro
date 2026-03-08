@@ -616,6 +616,55 @@ fn handle_intercepted_message(
             true
         }
 
+        // ----- Extension Dialog (path only, no file read) ----------------
+        "dialog:open-file" => {
+            let tx = tx.clone();
+            let app = app.clone();
+            let filter_name = msg
+                .get("filterName")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Racket files")
+                .to_string();
+            let filter_ext = msg
+                .get("filterExtension")
+                .and_then(|v| v.as_str())
+                .unwrap_or("rkt")
+                .to_string();
+
+            thread::spawn(move || {
+                let picked = app
+                    .dialog()
+                    .file()
+                    .add_filter(&filter_name, &[filter_ext.as_str()])
+                    .blocking_pick_file();
+
+                match picked {
+                    Some(file_path) => match file_path.into_path() {
+                        Ok(path_buf) => {
+                            let _ = tx.send(json!({
+                                "type": "dialog:result",
+                                "path": path_buf.to_string_lossy().to_string(),
+                            }));
+                        }
+                        Err(e) => {
+                            log::error!("dialog:open-file invalid path: {e}");
+                            let _ = tx.send(json!({
+                                "type": "dialog:result",
+                                "path": null,
+                            }));
+                        }
+                    },
+                    None => {
+                        let _ = tx.send(json!({
+                            "type": "dialog:result",
+                            "path": null,
+                        }));
+                    }
+                }
+            });
+            true
+        }
+
         // ----- Lifecycle ------------------------------------------------
         "lifecycle:quit" => {
             let app_caller = app.clone();
