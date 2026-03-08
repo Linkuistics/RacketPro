@@ -10,7 +10,8 @@
          "stepper.rkt"
          "macro-expander.rkt"
          "extension.rkt"
-         "handler-registry.rkt")
+         "handler-registry.rkt"
+         "settings.rkt")
 
 ;; ── Cells ──────────────────────────────────────────────────
 (define-cell current-file "")
@@ -568,6 +569,12 @@
          (cell-set! 'status (format "Loaded extension: ~a" path))))]
     [(string=? typ "fs:change")
      (handle-fs-change msg)]
+    [(string=? typ "settings:loaded")
+     (define loaded (message-ref msg 'settings (hasheq)))
+     (apply-loaded-settings! loaded)
+     ;; Apply theme from settings
+     (define theme-name (settings-ref 'theme "Light"))
+     (send-message! (make-message "event" 'name "theme:switch" 'theme theme-name))]
     [(string=? typ "ping")
      (send-message! (make-message "pong"))]
     [else
