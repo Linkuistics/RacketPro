@@ -10,6 +10,7 @@ use pty::PtyManager;
 use serde_json::Value;
 use std::sync::Arc;
 use tauri::{Manager, State};
+use tauri_plugin_dialog::DialogExt;
 
 /// Application state shared across all Tauri command handlers.
 pub struct AppState {
@@ -123,6 +124,24 @@ pub fn run() {
 
             let script_str = script_path.to_string_lossy().to_string();
             eprintln!("[bridge] Racket script path: {script_str}");
+
+            // Check for Racket before starting bridge
+            if std::process::Command::new("racket")
+                .arg("--version")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_err()
+            {
+                eprintln!("[bridge] Racket not found on PATH");
+                let handle = app.handle().clone();
+                handle
+                    .dialog()
+                    .message("Racket is required but was not found on your PATH.\n\nPlease install Racket from https://racket-lang.org and ensure the 'racket' command is available in your terminal.")
+                    .title("Racket Not Found")
+                    .kind(tauri_plugin_dialog::MessageDialogKind::Error)
+                    .show(|_| {});
+            }
 
             // Create PtyManager first — shared between the bridge and Tauri commands.
             let pty_manager = PtyManager::new();
