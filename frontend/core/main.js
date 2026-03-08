@@ -26,6 +26,7 @@ import './primitives/tab-content.js';
 import './primitives/macro-panel.js';
 import './primitives/extension-manager.js';
 import './primitives/search-panel.js';
+import './primitives/settings-panel.js';
 import './lang-intel.js';
 
 async function boot() {

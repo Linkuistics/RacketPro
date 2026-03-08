@@ -267,7 +267,9 @@
             (hasheq 'label "Open..." 'shortcut "Cmd+O" 'action "open-file")
             (hasheq 'label "Save" 'shortcut "Cmd+S" 'action "save-file")
             (hasheq 'label "---")
-            (hasheq 'label "Find in Project..." 'shortcut "Cmd+Shift+F" 'action "find-in-project")))
+            (hasheq 'label "Find in Project..." 'shortcut "Cmd+Shift+F" 'action "find-in-project")
+            (hasheq 'label "---")
+            (hasheq 'label "Settings..." 'shortcut "Cmd+," 'action "settings")))
    (hasheq 'label "Edit"
            'children
            (list
@@ -444,6 +446,42 @@
                                     'query query
                                     'regex is-regex
                                     'caseSensitive case-sensitive)))]
+    ;; Settings panel: open
+    [(string=? event-name "settings:open")
+     (send-message! (make-message "settings:open"))
+     ;; Send current settings and theme list to the panel
+     (send-message! (make-message "settings:current"
+                                  'settings (current-settings)))
+     (send-message! (make-message "theme:list"
+                                  'themes (list-themes)))
+     (cell-set! 'status "Settings")]
+    ;; Settings panel: change a setting
+    [(string=? event-name "settings:change")
+     (define key (string->symbol (message-ref msg 'key "")))
+     (define sub-key (message-ref msg 'subKey #f))
+     (define value (message-ref msg 'value #f))
+     (cond
+       [(and sub-key (hash? (settings-ref key)))
+        (define current (settings-ref key))
+        (settings-set! key (hash-set current (string->symbol sub-key) value))]
+       [else
+        (settings-set! key value)])
+     ;; Apply editor settings changes live
+     (when (eq? key 'editor)
+       (send-message! (make-message "editor:apply-settings"
+                                    'settings (settings-ref 'editor))))
+     ;; Send updated settings back to the panel
+     (send-message! (make-message "settings:current"
+                                  'settings (current-settings)))]
+    ;; Keybinding: reset a single keybinding to its default
+    [(string=? event-name "keybinding:reset")
+     (define action (message-ref msg 'action ""))
+     (when (not (string=? action ""))
+       ;; Find the default shortcut for this action
+       (for ([(shortcut act) (in-hash default-keybindings)])
+         (when (equal? act action)
+           (keybinding-set! shortcut action)))
+       (send-keybindings-to-frontend!))]
     ;; Theme switching
     [(string=? event-name "theme:switch")
      (define theme-name (message-ref msg 'theme "Light"))
@@ -507,6 +545,13 @@
     [(string=? action "find-in-project")
      (cell-set! 'current-bottom-tab "search")
      (send-message! (make-message "project:search-focus"))]
+    [(string=? action "settings")
+     (send-message! (make-message "settings:open"))
+     (send-message! (make-message "settings:current"
+                                  'settings (current-settings)))
+     (send-message! (make-message "theme:list"
+                                  'themes (list-themes)))
+     (cell-set! 'status "Settings")]
     [else
      (eprintf "Unhandled menu action: ~a\n" action)]))
 
