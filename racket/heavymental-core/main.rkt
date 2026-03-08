@@ -108,7 +108,8 @@
                                                                             (hasheq 'id "problems" 'label "Problems")
                                                                             (hasheq 'id "stepper" 'label "Stepper")
                                                                             (hasheq 'id "macros" 'label "Macros")
-                                                                            (hasheq 'id "extensions" 'label "Extensions")))
+                                                                            (hasheq 'id "extensions" 'label "Extensions")
+                                                                            (hasheq 'id "search" 'label "Search")))
                                                        'children (list))
                                                ;; Tab content: only active tab's child is visible
                                                (hasheq 'type "tab-content"
@@ -143,6 +144,10 @@
                                                         ;; EXTENSIONS tab
                                                         (hasheq 'type "extension-manager"
                                                                 'props (hasheq 'data-tab-id "extensions")
+                                                                'children (list))
+                                                        ;; SEARCH tab
+                                                        (hasheq 'type "search-panel"
+                                                                'props (hasheq 'data-tab-id "search")
                                                                 'children (list))))))))))))
            ;; ── Status bar ──
            (hasheq 'type "statusbar"
@@ -259,7 +264,9 @@
            (list
             (hasheq 'label "New" 'shortcut "Cmd+N" 'action "new-file")
             (hasheq 'label "Open..." 'shortcut "Cmd+O" 'action "open-file")
-            (hasheq 'label "Save" 'shortcut "Cmd+S" 'action "save-file")))
+            (hasheq 'label "Save" 'shortcut "Cmd+S" 'action "save-file")
+            (hasheq 'label "---")
+            (hasheq 'label "Find in Project..." 'shortcut "Cmd+Shift+F" 'action "find-in-project")))
    (hasheq 'label "Edit"
            'children
            (list
@@ -422,6 +429,20 @@
          (rebuild-layout!)
          (update-extensions-list-cell!)
          (cell-set! 'status (format "Unloaded extension: ~a" ext-id-str))))]
+    ;; Search focus (Cmd+Shift+F from frontend)
+    [(string=? event-name "project:search-focus")
+     (cell-set! 'current-bottom-tab "search")]
+    ;; Project search request
+    [(string=? event-name "project:search")
+     (define query (message-ref msg 'query ""))
+     (define is-regex (message-ref msg 'regex #f))
+     (define case-sensitive (message-ref msg 'caseSensitive #f))
+     (when (not (string=? query ""))
+       (send-message! (make-message "project:search"
+                                    'root (cell-ref 'project-root)
+                                    'query query
+                                    'regex is-regex
+                                    'caseSensitive case-sensitive)))]
     ;; Theme switching
     [(string=? event-name "theme:switch")
      (define theme-name (message-ref msg 'theme "Light"))
@@ -468,6 +489,9 @@
      (define path (current-file-path))
      (when (and path (not (string=? path "")) (not (string=? path "untitled.rkt")))
        (start-macro-expander path))]
+    [(string=? action "find-in-project")
+     (cell-set! 'current-bottom-tab "search")
+     (send-message! (make-message "project:search-focus"))]
     [else
      (eprintf "Unhandled menu action: ~a\n" action)]))
 
