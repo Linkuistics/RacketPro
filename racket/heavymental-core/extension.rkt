@@ -25,6 +25,8 @@
          get-extension-handler
          get-extension-layout-contributions
          assign-layout-ids
+         get-extension-source-path
+         reset-extensions!
          watch-directory!
          unwatch-all!
          handle-fs-change)
@@ -140,6 +142,9 @@
 ;; Extension event dispatch table: string "ext-id:event-name" → handler proc
 (define extension-handlers (make-hash))
 
+;; Extension source paths: symbol id → path string (for live reload)
+(define extension-source-paths (make-hash))
+
 ;; ── Namespacing helpers ──────────────────────────────────────────────────────
 
 ;; Prefix a cell name symbol: 'counter → 'my-ext:counter
@@ -203,7 +208,7 @@
 ;; ── Loading ──────────────────────────────────────────────────────────────────
 
 ;; Load from a descriptor object (used in tests and internally)
-(define (load-extension-descriptor! desc)
+(define (load-extension-descriptor! desc [source-path #f])
   (define id (extension-descriptor-id desc))
   (define id-str (symbol->string id))
 
@@ -220,6 +225,10 @@
     (define prefixed (prefix-event-name id-str (hash-ref event-spec 'name)))
     (hash-set! extension-handlers prefixed (hash-ref event-spec 'handler)))
 
+  ;; Track source path for live reload
+  (when source-path
+    (hash-set! extension-source-paths id source-path))
+
   ;; Store in registry
   (hash-set! loaded-extensions id desc)
 
@@ -231,6 +240,7 @@
 ;; Load from a file path (dynamic-require)
 (define (load-extension! path)
   (define mod-path (if (path? path) path (string->path path)))
+  (define path-str (if (path? path) (path->string path) path))
   (define desc (dynamic-require mod-path 'extension #:fail-thunk
                                 (lambda ()
                                   (error 'load-extension!
@@ -239,7 +249,7 @@
   (unless (extension-descriptor? desc)
     (error 'load-extension!
            "module at ~a: 'extension is not an extension-descriptor" path))
-  (load-extension-descriptor! desc))
+  (load-extension-descriptor! desc path-str))
 
 ;; ── Unloading ────────────────────────────────────────────────────────────────
 
@@ -265,6 +275,9 @@
     (define prefixed (prefix-cell-name ext-id (car cell-spec)))
     (cell-unregister! prefixed))
 
+  ;; Clear source path
+  (hash-remove! extension-source-paths ext-id)
+
   ;; Remove from registry
   (hash-remove! loaded-extensions ext-id))
 
@@ -280,6 +293,18 @@
 
 (define (get-extension-handler event-name)
   (hash-ref extension-handlers event-name #f))
+
+;; Get the source file path for a loaded extension (or #f if not tracked)
+(define (get-extension-source-path ext-id)
+  (hash-ref extension-source-paths ext-id #f))
+
+;; ── Reset (for testing) ────────────────────────────────────────────────────
+
+;; Clear all extension state — used in tests for isolation
+(define (reset-extensions!)
+  (hash-clear! loaded-extensions)
+  (hash-clear! extension-handlers)
+  (hash-clear! extension-source-paths))
 
 ;; Collect all panel layout contributions from loaded extensions
 (define (get-extension-layout-contributions)

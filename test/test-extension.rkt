@@ -9,6 +9,9 @@
          "../racket/heavymental-core/cell.rkt"
          "../racket/heavymental-core/extension.rkt")
 
+;; Helper to clean state between source-path tracking tests
+;; (reset-extensions! and get-extension-source-path imported from extension.rkt)
+
 ;; ── Helpers ──────────────────────────────────────────────────────────────────
 
 (define (parse-all-messages output)
@@ -354,6 +357,58 @@
   (check-equal? (cell-ref 'integration-ext:val) 0)  ;; reset to initial
   (with-output-to-string
     (lambda () (unload-extension! 'integration-ext))))
+
+;; ── Test: Source path tracking for live reload ──────────────────────────────
+
+(test-case "load-extension! records source path for live reload"
+  (reset-extensions!)
+  (define test-desc
+    (extension-descriptor
+     'test-watch "Test Watch" '() '() '() '() #f #f))
+  (with-output-to-string
+    (lambda ()
+      (load-extension-descriptor! test-desc "/tmp/test-ext.rkt")))
+  (check-equal? (get-extension-source-path 'test-watch) "/tmp/test-ext.rkt")
+  (with-output-to-string
+    (lambda () (unload-extension! 'test-watch))))
+
+(test-case "unload-extension! clears source path"
+  (reset-extensions!)
+  (define test-desc
+    (extension-descriptor
+     'test-watch2 "Test Watch 2" '() '() '() '() #f #f))
+  (with-output-to-string
+    (lambda ()
+      (load-extension-descriptor! test-desc "/tmp/test-ext2.rkt")))
+  (with-output-to-string
+    (lambda () (unload-extension! 'test-watch2)))
+  (check-false (get-extension-source-path 'test-watch2)))
+
+(test-case "load-extension-descriptor! without source-path leaves path as #f"
+  (reset-extensions!)
+  (define test-desc
+    (extension-descriptor
+     'test-no-path "No Path" '() '() '() '() #f #f))
+  (with-output-to-string
+    (lambda ()
+      (load-extension-descriptor! test-desc)))
+  (check-false (get-extension-source-path 'test-no-path))
+  (with-output-to-string
+    (lambda () (unload-extension! 'test-no-path))))
+
+(test-case "reset-extensions! clears source paths"
+  (reset-extensions!)
+  (define test-desc
+    (extension-descriptor
+     'test-reset-path "Reset Path" '() '() '() '() #f #f))
+  (with-output-to-string
+    (lambda ()
+      (load-extension-descriptor! test-desc "/tmp/reset-test.rkt")))
+  (check-equal? (get-extension-source-path 'test-reset-path) "/tmp/reset-test.rkt")
+  (reset-extensions!)
+  (check-false (get-extension-source-path 'test-reset-path)))
+
+;; ── Integration: full extension lifecycle ────────────────────────────────
 
 (test-case "integration: extension layout contributions have correct IDs"
   (define-extension layout-int-test
