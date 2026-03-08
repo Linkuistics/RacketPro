@@ -21,6 +21,7 @@ import './primitives/stepper.js';
 import './primitives/bottom-tabs.js';
 import './primitives/tab-content.js';
 import './primitives/macro-panel.js';
+import './primitives/extension-manager.js';
 import './lang-intel.js';
 
 async function boot() {
