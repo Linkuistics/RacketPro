@@ -9,7 +9,8 @@
          "lang-intel.rkt"
          "stepper.rkt"
          "macro-expander.rkt"
-         "extension.rkt")
+         "extension.rkt"
+         "handler-registry.rkt")
 
 ;; ── Cells ──────────────────────────────────────────────────
 (define-cell current-file "")
@@ -148,10 +149,23 @@
 ;; ── Layout rebuild with extension panels ─────────────────────────
 ;; Rebuild and re-send the layout, merging extension panel contributions
 ;; into the bottom tabs area.
+(define previous-layout #f)  ;; track the last sent layout for handler cleanup
+
 (define (rebuild-layout!)
   (define ext-panels (get-extension-layout-contributions))
-  (define layout (merge-extension-panels initial-layout ext-panels))
-  (send-message! (make-message "layout:set" 'layout (assign-layout-ids layout)))
+  (define new-layout (assign-layout-ids (merge-extension-panels initial-layout ext-panels)))
+
+  ;; Cleanup orphaned handlers: remove _h: handlers that were in the old
+  ;; layout but are not in the new one
+  (when previous-layout
+    (define old-ids (collect-handler-ids previous-layout))
+    (define new-ids (collect-handler-ids new-layout))
+    (define orphaned (remove* new-ids old-ids equal?))
+    (when (not (null? orphaned))
+      (remove-handlers! orphaned)))
+  (set! previous-layout new-layout)
+
+  (send-message! (make-message "layout:set" 'layout new-layout))
   (rebuild-menu!))
 
 ;; Merge extension panels into the layout tree.
@@ -404,11 +418,15 @@
          (update-extensions-list-cell!)
          (cell-set! 'status (format "Unloaded extension: ~a" ext-id-str))))]
     [else
-     ;; Check extension dispatch table before logging unknown
-     (define ext-handler (get-extension-handler event-name))
-     (if ext-handler
-         (ext-handler msg)
-         (eprintf "Unknown event: ~a\n" event-name))]))
+     ;; Check auto-handlers (from ui macro lambdas), then extension dispatch
+     (define auto-handler (get-auto-handler event-name))
+     (cond
+       [auto-handler (auto-handler msg)]
+       [else
+        (define ext-handler (get-extension-handler event-name))
+        (if ext-handler
+            (ext-handler msg)
+            (eprintf "Unknown event: ~a\n" event-name))])]))
 
 ;; ── Menu action handler ───────────────────────────────────
 (define (handle-menu-action msg)

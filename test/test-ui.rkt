@@ -94,3 +94,30 @@
   ;; The dispatch wrapper should call with no args
   (handler (hasheq))  ;; dispatch sends msg, wrapper adapts arity
   (check-equal? (unbox counter) 1))
+
+;; ---- Handler cleanup tests ----
+
+;; Test: collect-handler-ids finds _h: IDs in layout tree
+(test-case "collect-handler-ids extracts handler IDs"
+  (define layout
+    (hasheq 'type "vbox"
+            'props (hasheq)
+            'children
+            (list (hasheq 'type "button"
+                          'props (hasheq 'on-click "_h:1" 'label "Go")
+                          'children '())
+                  (hasheq 'type "button"
+                          'props (hasheq 'on-click "_h:2")
+                          'children '()))))
+  (define ids (collect-handler-ids layout))
+  (check-equal? (sort ids string<?) '("_h:1" "_h:2")))
+
+;; Test: remove-handlers! cleans up
+(test-case "remove-handlers! deletes from registry"
+  (clear-auto-handlers!)
+  (define id1 (register-auto-handler! (lambda () (void))))
+  (define id2 (register-auto-handler! (lambda () (void))))
+  (check-true (procedure? (get-auto-handler id1)))
+  (remove-handlers! (list id1))
+  (check-false (get-auto-handler id1))
+  (check-true (procedure? (get-auto-handler id2))))
