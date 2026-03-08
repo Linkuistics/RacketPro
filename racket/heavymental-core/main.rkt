@@ -101,7 +101,8 @@
                                                                       (list (hasheq 'id "terminal" 'label "Terminal")
                                                                             (hasheq 'id "problems" 'label "Problems")
                                                                             (hasheq 'id "stepper" 'label "Stepper")
-                                                                            (hasheq 'id "macros" 'label "Macros")))
+                                                                            (hasheq 'id "macros" 'label "Macros")
+                                                                            (hasheq 'id "extensions" 'label "Extensions")))
                                                        'children (list))
                                                ;; Tab content: only active tab's child is visible
                                                (hasheq 'type "tab-content"
@@ -132,6 +133,10 @@
                                                         ;; MACROS tab (placeholder for now)
                                                         (hasheq 'type "macro-panel"
                                                                 'props (hasheq 'data-tab-id "macros")
+                                                                'children (list))
+                                                        ;; EXTENSIONS tab
+                                                        (hasheq 'type "extension-manager"
+                                                                'props (hasheq 'data-tab-id "extensions")
                                                                 'children (list))))))))))))
            ;; ── Status bar ──
            (hasheq 'type "statusbar"
