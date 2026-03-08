@@ -2,6 +2,7 @@ mod bridge;
 mod debug;
 mod fs;
 mod pty;
+mod settings;
 
 use bridge::RacketBridge;
 use pty::PtyManager;
@@ -132,6 +133,11 @@ pub fn run() {
             ) {
                 Ok(b) => {
                     eprintln!("[bridge] Racket bridge started successfully");
+                    let startup_settings = crate::settings::read_settings();
+                    let _ = b.send(serde_json::json!({
+                        "type": "settings:loaded",
+                        "settings": startup_settings,
+                    }));
                     Some(Arc::new(b))
                 }
                 Err(e) => {

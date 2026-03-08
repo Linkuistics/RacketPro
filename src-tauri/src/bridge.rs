@@ -759,6 +759,21 @@ fn handle_intercepted_message(
             true
         }
 
+        // ----- Settings ---------------------------------------------------
+        "settings:save" => {
+            if let Some(settings) = msg.get("settings") {
+                let settings = settings.clone();
+                thread::spawn(move || {
+                    if let Err(e) = crate::settings::write_settings(&settings) {
+                        eprintln!("[settings] save error: {e}");
+                    } else {
+                        eprintln!("[settings] saved successfully");
+                    }
+                });
+            }
+            true
+        }
+
         // Not intercepted — forward to frontend
         _ => false,
     }
