@@ -2,6 +2,7 @@ mod bridge;
 mod debug;
 mod fs;
 mod pty;
+mod search;
 mod settings;
 
 use bridge::RacketBridge;

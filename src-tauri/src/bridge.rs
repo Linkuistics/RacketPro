@@ -774,6 +774,69 @@ fn handle_intercepted_message(
             true
         }
 
+        // ----- Project Search -----------------------------------------------
+        "project:search" => {
+            let root = msg
+                .get("root")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let query = msg
+                .get("query")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let is_regex = msg
+                .get("regex")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let case_sensitive = msg
+                .get("caseSensitive")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let file_glob = msg
+                .get("glob")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let exclude_dirs: Vec<String> = msg
+                .get("excludeDirs")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_else(|| {
+                    vec![
+                        ".git".into(),
+                        "compiled".into(),
+                        "node_modules".into(),
+                        ".heavymental".into(),
+                    ]
+                });
+
+            let app_outer = app.clone();
+            thread::spawn(move || {
+                let results = crate::search::search_project(
+                    &root,
+                    &query,
+                    is_regex,
+                    case_sensitive,
+                    file_glob.as_deref(),
+                    &exclude_dirs,
+                );
+                let payload = json!({
+                    "type": "project:search:results",
+                    "results": results.get("results").cloned().unwrap_or(json!([])),
+                    "truncated": results.get("truncated").and_then(|v| v.as_bool()).unwrap_or(false),
+                });
+                if let Err(e) = app_outer.emit("racket:project:search:results", payload) {
+                    eprintln!("[bridge] project:search emit failed: {e}");
+                }
+            });
+            true
+        }
+
         // Not intercepted — forward to frontend
         _ => false,
     }
