@@ -1,6 +1,8 @@
 #lang racket/base
-(require (for-syntax racket/base racket/list))
-(provide ui)
+(require (for-syntax racket/base racket/list racket/string)
+         "handler-registry.rkt")
+(provide ui
+         (all-from-out "handler-registry.rkt"))
 
 ;; The `ui` macro transforms declarative layout expressions into hasheq trees.
 ;;
@@ -56,13 +58,25 @@
        ;; Build props hasheq: alternating 'key val pairs
        ;; Each prop-pair is (list #:key-stx val-stx)
        ;; We need to produce (hasheq 'key1 val1 'key2 val2 ...)
+       ;; Check if a keyword names an event handler (on-click, on-change, etc.)
+       (define (handler-keyword? kw)
+         (string-prefix? (keyword->string kw) "on-"))
        (define prop-kv-stxs
          (apply append
                 (map (lambda (p)
                        (define kw (syntax-e (car p)))  ; a keyword
                        (define key-sym (string->symbol (keyword->string kw)))
                        (define key-stx (datum->syntax stx `(quote ,key-sym)))
-                       (list key-stx (cadr p)))
+                       (define val-stx (cadr p))
+                       ;; For handler props, wrap value with ui-resolve-handler
+                       ;; so lambdas get auto-registered at runtime
+                       (define final-val
+                         (if (handler-keyword? kw)
+                             (datum->syntax val-stx
+                                            `(ui-resolve-handler ,val-stx)
+                                            val-stx)
+                             val-stx))
+                       (list key-stx final-val))
                      prop-pairs)))
        ;; Build children expressions - recursively process nested forms
        (define children-exprs

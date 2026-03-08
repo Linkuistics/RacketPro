@@ -1,7 +1,9 @@
 #lang racket/base
 (require rackunit
          racket/list
-         "../racket/heavymental-core/ui.rkt")
+         racket/string
+         "../racket/heavymental-core/ui.rkt"
+         "../racket/heavymental-core/handler-registry.rkt")
 
 ;; Basic element
 (test-case "ui: single element with no props"
@@ -52,3 +54,43 @@
 (test-case "ui: cell reference in prop preserved"
   (define result (ui (text #:content "cell:counter")))
   (check-equal? (hash-ref (hash-ref result 'props) 'content) "cell:counter"))
+
+;; ---- Handler auto-registration tests ----
+
+;; Test: string handlers pass through unchanged
+(test-case "ui: string on-click handler passes through"
+  (define result (ui (button #:label "Go" #:on-click "my-event")))
+  (check-equal? (hash-ref (hash-ref result 'props) 'on-click) "my-event"))
+
+;; Test: lambda handler gets auto-registered
+(test-case "ui: lambda on-click handler auto-registered"
+  (clear-auto-handlers!)
+  (define result (ui (button #:label "Go" #:on-click (lambda () (void)))))
+  (define handler-id (hash-ref (hash-ref result 'props) 'on-click))
+  (check-true (string-prefix? handler-id "_h:"))
+  ;; Handler should be in the registry
+  (check-true (procedure? (get-auto-handler handler-id))))
+
+;; Test: handler with msg argument works
+(test-case "ui: lambda with msg arg auto-registered"
+  (clear-auto-handlers!)
+  (define called? (box #f))
+  (define result
+    (ui (button #:on-click (lambda (msg) (set-box! called? #t)))))
+  (define handler-id (hash-ref (hash-ref result 'props) 'on-click))
+  (define handler (get-auto-handler handler-id))
+  ;; Call it with a fake message
+  (handler (hasheq 'type "event"))
+  (check-true (unbox called?)))
+
+;; Test: zero-arg handler called without msg
+(test-case "ui: zero-arg lambda called correctly"
+  (clear-auto-handlers!)
+  (define counter (box 0))
+  (define result
+    (ui (button #:on-click (lambda () (set-box! counter (add1 (unbox counter)))))))
+  (define handler-id (hash-ref (hash-ref result 'props) 'on-click))
+  (define handler (get-auto-handler handler-id))
+  ;; The dispatch wrapper should call with no args
+  (handler (hasheq))  ;; dispatch sends msg, wrapper adapts arity
+  (check-equal? (unbox counter) 1))
