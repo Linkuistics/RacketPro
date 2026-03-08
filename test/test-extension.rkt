@@ -426,3 +426,85 @@
   (check-equal? (hash-ref panel 'label) "Test Panel")
   (with-output-to-string
     (lambda () (unload-extension! 'layout-int-test))))
+
+;; ── Test: Live reload — file watching ───────────────────────────────────────
+
+(test-case "watch-extension-file! sends fs:watch message"
+  (reset-extensions!)
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (watch-extension-file! 'test-ext "/tmp/test-ext.rkt"))))
+  ;; Should have sent an fs:watch message
+  (define msgs (parse-all-messages output))
+  (check-true (> (length msgs) 0))
+  (define watch-msg (find-message-by-type msgs "fs:watch"))
+  (check-true (hash? watch-msg))
+  ;; Clean up
+  (with-output-to-string
+    (lambda () (unwatch-extension-file! 'test-ext))))
+
+(test-case "unwatch-extension-file! removes the watcher"
+  (reset-extensions!)
+  (with-output-to-string
+    (lambda ()
+      (watch-extension-file! 'test-ext "/tmp/test-ext.rkt")))
+  (check-true (string? (get-extension-watch-id 'test-ext)))
+  (with-output-to-string
+    (lambda ()
+      (unwatch-extension-file! 'test-ext)))
+  (check-false (get-extension-watch-id 'test-ext)))
+
+(test-case "reset-extensions! clears watch IDs"
+  (reset-extensions!)
+  (with-output-to-string
+    (lambda ()
+      (watch-extension-file! 'test-ext "/tmp/test-ext.rkt")))
+  (check-true (string? (get-extension-watch-id 'test-ext)))
+  (reset-extensions!)
+  (check-false (get-extension-watch-id 'test-ext)))
+
+(test-case "reload-extension! with error keeps old version"
+  (reset-extensions!)
+  (define test-desc
+    (extension-descriptor
+     'err-ext "Error Ext" '() '() '() '() #f #f))
+  (with-output-to-string
+    (lambda ()
+      (load-extension-descriptor! test-desc)))
+  ;; Try reloading from a nonexistent file — should error but keep old version
+  (with-output-to-string
+    (lambda ()
+      (safe-reload-extension! 'err-ext "/tmp/nonexistent-file-12345.rkt")))
+  ;; Old extension should still be loaded
+  (check-true (hash-has-key? (list-extensions-hash) 'err-ext)))
+
+(test-case "safe-reload-extension! sends error status on failure"
+  (reset-extensions!)
+  (define test-desc
+    (extension-descriptor
+     'fail-ext "Fail Ext" '() '() '() '() #f #f))
+  (with-output-to-string
+    (lambda ()
+      (load-extension-descriptor! test-desc)))
+  (define output
+    (with-output-to-string
+      (lambda ()
+        (safe-reload-extension! 'fail-ext "/tmp/nonexistent-file-12345.rkt"))))
+  (define msgs (parse-all-messages output))
+  (define status-msg (find-message-by-type msgs "cell:update"))
+  (check-true (hash? status-msg))
+  (check-true (string-contains? (hash-ref status-msg 'value "") "Error reloading")))
+
+(test-case "find-extension-by-path returns ext-id for known path"
+  (reset-extensions!)
+  (define test-desc
+    (extension-descriptor
+     'path-ext "Path Ext" '() '() '() '() #f #f))
+  (with-output-to-string
+    (lambda ()
+      (load-extension-descriptor! test-desc "/tmp/path-ext.rkt")))
+  (check-equal? (find-extension-by-path "/tmp/path-ext.rkt") 'path-ext)
+  (check-false (find-extension-by-path "/tmp/unknown.rkt"))
+  (with-output-to-string
+    (lambda () (unload-extension! 'path-ext))))

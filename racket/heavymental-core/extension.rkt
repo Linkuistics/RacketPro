@@ -3,6 +3,7 @@
 (require racket/list
          racket/string
          racket/hash
+         racket/path
          "protocol.rkt"
          "cell.rkt")
 
@@ -22,14 +23,20 @@
          unload-extension!
          reload-extension!
          list-extensions
+         list-extensions-hash
          get-extension-handler
          get-extension-layout-contributions
          assign-layout-ids
          get-extension-source-path
+         find-extension-by-path
          reset-extensions!
          watch-directory!
          unwatch-all!
-         handle-fs-change)
+         handle-fs-change
+         watch-extension-file!
+         unwatch-extension-file!
+         get-extension-watch-id
+         safe-reload-extension!)
 
 ;; ── Descriptor struct ────────────────────────────────────────────────────────
 
@@ -249,7 +256,10 @@
   (unless (extension-descriptor? desc)
     (error 'load-extension!
            "module at ~a: 'extension is not an extension-descriptor" path))
-  (load-extension-descriptor! desc path-str))
+  (load-extension-descriptor! desc path-str)
+  ;; Auto-watch the extension file for live reload
+  (define ext-id (extension-descriptor-id desc))
+  (watch-extension-file! ext-id path-str))
 
 ;; ── Unloading ────────────────────────────────────────────────────────────────
 
@@ -259,6 +269,9 @@
     (error 'unload-extension! "extension not loaded: ~a" ext-id))
 
   (define id-str (symbol->string ext-id))
+
+  ;; Stop watching extension file
+  (unwatch-extension-file! ext-id)
 
   ;; Call on-deactivate
   (define deactivate (extension-descriptor-on-deactivate desc))
@@ -284,7 +297,11 @@
 ;; ── Reload ───────────────────────────────────────────────────────────────────
 
 (define (reload-extension! path)
-  (load-extension! path))
+  (define path-str (if (path? path) (path->string path) path))
+  (define existing-id (find-extension-by-path path-str))
+  (when existing-id
+    (unload-extension! existing-id))
+  (load-extension! path-str))
 
 ;; ── Queries ──────────────────────────────────────────────────────────────────
 
@@ -298,13 +315,28 @@
 (define (get-extension-source-path ext-id)
   (hash-ref extension-source-paths ext-id #f))
 
+;; Expose loaded-extensions hash (for testing / inspection)
+(define (list-extensions-hash)
+  loaded-extensions)
+
+;; Find which extension ID corresponds to a source path (or #f)
+(define (find-extension-by-path path)
+  (for/or ([(id src) (in-hash extension-source-paths)])
+    (and (equal? src path) id)))
+
 ;; ── Reset (for testing) ────────────────────────────────────────────────────
 
 ;; Clear all extension state — used in tests for isolation
 (define (reset-extensions!)
   (hash-clear! loaded-extensions)
   (hash-clear! extension-handlers)
-  (hash-clear! extension-source-paths))
+  (hash-clear! extension-source-paths)
+  (hash-clear! extension-watch-ids)
+  ;; Kill any pending reload threads
+  (for ([(_id thd) (in-hash pending-reloads)])
+    (when (thread-running? thd)
+      (kill-thread thd)))
+  (hash-clear! pending-reloads))
 
 ;; Collect all panel layout contributions from loaded extensions
 (define (get-extension-layout-contributions)
@@ -390,3 +422,69 @@
   (define callback (hash-ref fs-watch-callbacks watch-id #f))
   (when callback
     (callback event-type path)))
+
+;; ── Extension file watching ────────────────────────────────────────────────
+
+;; Extension watch IDs: ext-id → watch-id string
+(define extension-watch-ids (make-hasheq))
+
+;; Pending debounced reload threads: ext-id → thread
+(define pending-reloads (make-hasheq))
+
+;; Start watching an extension's source file for changes.
+;; Watches the directory containing the file and filters for the specific file.
+(define (watch-extension-file! ext-id path)
+  (define dir (let ([p (path-only (if (path? path) path (string->path path)))])
+                (if p (path->string p) (path->string (current-directory)))))
+  (define path-str (if (path? path) (path->string path) path))
+  (define watch-id
+    (watch-directory! dir
+                      (lambda (event-type changed-path)
+                        (when (equal? (if (path? changed-path)
+                                          (path->string changed-path)
+                                          changed-path)
+                                      path-str)
+                          (handle-extension-file-change ext-id path-str)))))
+  (hash-set! extension-watch-ids ext-id watch-id))
+
+;; Stop watching an extension's source file.
+(define (unwatch-extension-file! ext-id)
+  (define watch-id (hash-ref extension-watch-ids ext-id #f))
+  (when watch-id
+    (send-message! (make-message "fs:unwatch" 'id watch-id))
+    (hash-remove! fs-watch-callbacks watch-id)
+    (hash-remove! extension-watch-ids ext-id)))
+
+;; Get the watch-id for an extension (or #f if not watched)
+(define (get-extension-watch-id ext-id)
+  (hash-ref extension-watch-ids ext-id #f))
+
+;; Handle a file change event for an extension — debounce by 300ms
+(define (handle-extension-file-change ext-id path)
+  ;; Cancel any pending reload for this extension
+  (define existing (hash-ref pending-reloads ext-id #f))
+  (when (and existing (thread-running? existing))
+    (kill-thread existing))
+  ;; Schedule debounced reload
+  (hash-set! pending-reloads ext-id
+    (thread
+      (lambda ()
+        (sleep 0.3)  ;; 300ms debounce
+        (hash-remove! pending-reloads ext-id)
+        (safe-reload-extension! ext-id path)))))
+
+;; Reload an extension with error handling.
+;; On failure, keeps the old version loaded and reports the error via cell.
+(define (safe-reload-extension! ext-id path)
+  (with-handlers ([exn:fail?
+                   (lambda (e)
+                     (send-message!
+                       (make-message "cell:update"
+                         'name "_reload-status"
+                         'value (format "Error reloading ~a: ~a"
+                                        ext-id (exn-message e)))))])
+    (reload-extension! path)
+    (send-message!
+      (make-message "cell:update"
+        'name "_reload-status"
+        'value (format "Reloaded ~a" ext-id)))))

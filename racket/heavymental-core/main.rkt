@@ -26,6 +26,7 @@
 (define-cell stepper-total -1)
 (define-cell current-bottom-tab "terminal")
 (define-cell macro-active #f)
+(define-cell _reload-status "")
 
 ;; Track which REPL generation was active when the last pty:create ran.
 ;; Used to ignore pty:exit events from stale (killed) REPL processes.
