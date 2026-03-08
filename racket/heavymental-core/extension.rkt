@@ -4,6 +4,7 @@
          racket/string
          racket/hash
          racket/path
+         racket/rerequire
          "protocol.rkt"
          "cell.rkt")
 
@@ -244,10 +245,12 @@
   (when (and activate (procedure? activate))
     (activate)))
 
-;; Load from a file path (dynamic-require)
+;; Load from a file path (dynamic-require with cache invalidation)
 (define (load-extension! path)
   (define mod-path (if (path? path) path (string->path path)))
   (define path-str (if (path? path) (path->string path) path))
+  ;; Invalidate Racket's module cache so reloads pick up file changes
+  (dynamic-rerequire mod-path)
   (define desc (dynamic-require mod-path 'extension #:fail-thunk
                                 (lambda ()
                                   (error 'load-extension!
