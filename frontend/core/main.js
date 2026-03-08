@@ -52,6 +52,43 @@ async function boot() {
   console.log('[boot] 4.7/5 keybindings initialised');
   onMessage('lifecycle:ready', () => console.log('[boot] Racket core is ready'));
 
+  // UI font size — applied as a CSS custom property on :root
+  const applyUiSettings = (s) => {
+    if (s?.fontSize) {
+      document.documentElement.style.setProperty('--ui-font-size', `${s.fontSize}px`);
+    }
+  };
+  onMessage('ui:apply-settings', (msg) => applyUiSettings(msg.settings));
+  onMessage('settings:current', (msg) => applyUiSettings(msg.settings?.ui));
+
+  // Settings overlay: show/hide a full-screen settings panel
+  onMessage('settings:open', () => {
+    if (document.getElementById('settings-overlay')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'settings-overlay';
+    Object.assign(overlay.style, {
+      position: 'fixed', inset: '0', zIndex: '9999',
+      background: 'rgba(0,0,0,0.4)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    });
+    const panel = document.createElement('hm-settings-panel');
+    Object.assign(panel.style, {
+      width: '720px', height: '500px',
+      borderRadius: '8px', overflow: 'hidden',
+      boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+    });
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+    // Close on backdrop click or Escape
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+    const onKey = (e) => {
+      if (e.key === 'Escape') { overlay.remove(); window.removeEventListener('keydown', onKey, true); }
+    };
+    window.addEventListener('keydown', onKey, true);
+  });
+
   // Phase 3: Signal ready — now that all listeners are registered, tell
   // Rust to flush queued messages.  Events arrive into existing listeners.
   await signalReady();

@@ -18,22 +18,8 @@ class HmExtensionManager extends LitElement {
       overflow-y: auto;
       background: var(--bg-panel, #F5F5F5);
       font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif);
-      font-size: 13px;
+      font-size: var(--ui-fs);
       color: var(--fg-primary, #333333);
-    }
-
-    .header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 4px 8px;
-      background: var(--bg-panel-header, #E8E8E8);
-      font-weight: 600;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--fg-muted, #999999);
-      border-bottom: 1px solid var(--border, #D4D4D4);
     }
 
     .ext-row {
@@ -71,7 +57,7 @@ class HmExtensionManager extends LitElement {
       background: var(--bg-primary, #FFFFFF);
       color: var(--fg-primary, #333333);
       cursor: pointer;
-      font-size: 12px;
+      font-size: var(--ui-fs-md);
       font-family: inherit;
     }
 
@@ -130,9 +116,6 @@ class HmExtensionManager extends LitElement {
   render() {
     const count = this._extensions.length;
     return html`
-      <div class="header">
-        <span>Extensions ${count > 0 ? `(${count})` : ''}</span>
-      </div>
       ${count === 0
         ? html`<div class="empty">No extensions loaded.</div>`
         : this._extensions.map(ext => html`

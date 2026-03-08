@@ -20,7 +20,7 @@ export class HmSearchPanel extends LitElement {
       background: var(--bg-primary, #fff);
       color: var(--fg-primary, #333);
       font-family: var(--font-sans);
-      font-size: 13px;
+      font-size: var(--ui-fs);
     }
     .search-bar {
       display: flex;
@@ -36,7 +36,7 @@ export class HmSearchPanel extends LitElement {
       border: 1px solid var(--border, #d4d4d4);
       border-radius: 3px;
       font-family: var(--font-mono);
-      font-size: 12px;
+      font-size: var(--ui-fs-md);
       background: var(--bg-primary, #fff);
       color: var(--fg-primary, #333);
       outline: none;
@@ -51,7 +51,7 @@ export class HmSearchPanel extends LitElement {
       background: var(--bg-primary, #fff);
       color: var(--fg-secondary, #616161);
       cursor: pointer;
-      font-size: 11px;
+      font-size: var(--ui-fs-sm);
     }
     .search-bar button.active {
       background: var(--accent, #007acc);
@@ -69,7 +69,7 @@ export class HmSearchPanel extends LitElement {
     .file-header {
       padding: 3px 8px;
       font-weight: 600;
-      font-size: 12px;
+      font-size: var(--ui-fs-md);
       color: var(--fg-secondary, #616161);
       background: var(--bg-secondary, #f3f3f3);
       border-bottom: 1px solid var(--border, #d4d4d4);
@@ -90,18 +90,18 @@ export class HmSearchPanel extends LitElement {
       min-width: 40px;
       text-align: right;
       font-family: var(--font-mono);
-      font-size: 12px;
+      font-size: var(--ui-fs-md);
     }
     .match-text {
       font-family: var(--font-mono);
-      font-size: 12px;
+      font-size: var(--ui-fs-md);
       white-space: pre;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     .status {
       padding: 4px 8px;
-      font-size: 11px;
+      font-size: var(--ui-fs-sm);
       color: var(--fg-muted, #999);
       border-top: 1px solid var(--border, #d4d4d4);
     }

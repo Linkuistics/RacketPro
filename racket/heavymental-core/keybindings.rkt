@@ -14,9 +14,9 @@
 (define default-keybindings
   (hasheq "Cmd+N" "new-file"
           "Cmd+O" "open-file"
-          "Cmd+S" "editor:save-request"
+          "Cmd+S" "save-file"
           "Cmd+R" "run"
-          "Cmd+," "settings:open"
+          "Cmd+," "settings"
           "Cmd+Shift+F" "find-in-project"
           "Cmd+Shift+R" "step-through"
           "Cmd+Shift+E" "expand-macros"))

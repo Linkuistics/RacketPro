@@ -15,14 +15,16 @@
 ;; Default settings
 (define _defaults
   (hasheq 'theme "Light"
-          'editor (hasheq 'fontFamily "SF Mono"
+          'editor (hasheq 'fontFamily "'SF Mono', 'Fira Code', Menlo, monospace"
                           'fontSize 13
-                          'fontWeight 300
                           'vimMode #f
                           'tabSize 2
                           'wordWrap #f
                           'minimap #f
                           'lineNumbers #t)
+          'terminal (hasheq 'fontFamily "'SF Mono', 'Fira Code', Menlo, monospace"
+                            'fontSize 13)
+          'ui (hasheq 'fontSize 13)
           'keybindings (hasheq)
           'window (hasheq 'width 1200 'height 800)
           'recentFiles '()))

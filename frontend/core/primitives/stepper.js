@@ -25,7 +25,7 @@ class HmStepperToolbar extends LitElement {
       background: var(--bg-toolbar, #F8F8F8);
       border-bottom: 1px solid var(--border, #D4D4D4);
       font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif);
-      font-size: 13px;
+      font-size: var(--ui-fs);
       min-height: 28px;
       flex-shrink: 0;
     }
@@ -40,7 +40,7 @@ class HmStepperToolbar extends LitElement {
       background: var(--bg-primary, #FFFFFF);
       color: var(--fg-primary, #333333);
       cursor: pointer;
-      font-size: 12px;
+      font-size: var(--ui-fs-md);
       font-family: inherit;
     }
 
@@ -98,7 +98,7 @@ class HmBindingsPanel extends LitElement {
       overflow-y: auto;
       padding: 8px 12px;
       font-family: var(--font-editor, "SF Mono", Menlo, monospace);
-      font-size: 13px;
+      font-size: var(--ui-fs);
       font-weight: var(--font-editor-weight, 300);
       background: var(--bg-primary, #FFFFFF);
       color: var(--fg-primary, #333333);
@@ -134,13 +134,13 @@ class HmBindingsPanel extends LitElement {
     }
 
     .step-label {
-      font-size: 11px;
+      font-size: var(--ui-fs-sm);
       color: var(--fg-muted, #999999);
       margin-bottom: 4px;
     }
 
     .section-header {
-      font-size: 11px;
+      font-size: var(--ui-fs-sm);
       font-weight: 600;
       color: var(--fg-muted, #999999);
       text-transform: uppercase;

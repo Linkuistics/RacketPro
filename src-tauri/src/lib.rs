@@ -61,8 +61,69 @@ fn pty_resize(
     state.resize(&id, cols, rows)
 }
 
+/// Augment the process PATH so that Racket can be found when the app is
+/// launched as a macOS `.app` bundle (which has a minimal default PATH).
+fn augment_path() {
+    let current = std::env::var("PATH").unwrap_or_default();
+
+    // Well-known locations where Racket may live on macOS.
+    let mut extra: Vec<String> = vec![
+        "/opt/homebrew/bin".into(),  // Homebrew (Apple Silicon)
+        "/usr/local/bin".into(),     // Homebrew (Intel) / manual install
+    ];
+
+    // Official Racket .dmg installer: /Applications/Racket v8.x/bin
+    if let Ok(entries) = std::fs::read_dir("/Applications") {
+        for entry in entries.flatten() {
+            if let Some(name) = entry.file_name().to_str() {
+                if name.starts_with("Racket") {
+                    let bin = entry.path().join("bin");
+                    if bin.is_dir() {
+                        extra.push(bin.to_string_lossy().into_owned());
+                    }
+                }
+            }
+        }
+    }
+
+    // Also try to read the user's login shell PATH for non-standard installs.
+    if let Some(shell) = std::env::var("SHELL").ok().or_else(|| Some("/bin/zsh".into())) {
+        if let Ok(output) = std::process::Command::new(&shell)
+            .args(["-l", "-c", "echo $PATH"])
+            .output()
+        {
+            if output.status.success() {
+                let shell_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                for p in shell_path.split(':') {
+                    if !p.is_empty() && !extra.contains(&p.to_string()) && !current.contains(p) {
+                        extra.push(p.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // Prepend extra paths (preserving originals).
+    let mut all_paths = extra;
+    for p in current.split(':') {
+        if !p.is_empty() && !all_paths.contains(&p.to_string()) {
+            all_paths.push(p.to_string());
+        }
+    }
+    // SAFETY: called once at startup before any threads are spawned.
+    unsafe {
+        std::env::set_var("PATH", all_paths.join(":"));
+    }
+    eprintln!("[init] PATH: {}", std::env::var("PATH").unwrap_or_default());
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Augment PATH for macOS .app bundles, which don't inherit the user's
+    // shell PATH.  Without this, Racket (typically in /opt/homebrew/bin or
+    // /usr/local/bin) won't be found when launched from Finder/Dock.
+    augment_path();
+
     // Clear debug output from previous run
     debug::reset();
 

@@ -31,7 +31,7 @@ class HmButton extends LitElement {
 
     button {
       font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif);
-      font-size: 13px;
+      font-size: var(--ui-fs);
       padding: 4px 12px;
       border: 1px solid var(--border, #E5E5E5);
       border-radius: 4px;

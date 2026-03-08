@@ -21,7 +21,7 @@ class HmPanelHeader extends LitElement {
       border-top: 1px solid var(--border, #E5E5E5);
       border-bottom: 1px solid var(--border, #E5E5E5);
       font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif);
-      font-size: 11px;
+      font-size: var(--ui-fs-sm);
       font-weight: 600;
       letter-spacing: 0.5px;
       text-transform: uppercase;

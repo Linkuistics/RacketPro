@@ -84,6 +84,7 @@ class HmEditor extends LitElement {
       position: relative;
       overflow: hidden;
       box-sizing: border-box;
+      background: var(--bg-primary, #FFFFFF);
     }
 
     :host([hidden]) {
@@ -104,7 +105,7 @@ class HmEditor extends LitElement {
       background: var(--bg-statusbar, #e8e8e8);
       color: var(--fg-statusbar, #616161);
       font-family: var(--font-mono);
-      font-size: 11px;
+      font-size: var(--ui-fs-sm);
       padding: 2px 8px;
       display: none;
     }
@@ -155,6 +156,9 @@ class HmEditor extends LitElement {
     try {
       await this._initMonaco();
       this._setupBridgeListeners();
+      // Request saved settings — the boot-time editor:apply-settings
+      // message may have arrived before our listener was registered.
+      dispatch('settings:request', {});
     } catch (err) {
       console.error('[hm-editor] Failed to initialise Monaco:', err);
     }
@@ -196,9 +200,10 @@ class HmEditor extends LitElement {
       readOnly: this.readOnly,
       automaticLayout: true,
       minimap: { enabled: false },
+      scrollbar: { horizontal: 'hidden', horizontalScrollbarSize: 0 },
       fontSize: 13,
       fontWeight: '300',
-      fontFamily: "'OperatorMonoSSm Nerd Font Mono', 'SF Mono', 'Fira Code', Menlo, monospace",
+      fontFamily: "'SF Mono', 'Fira Code', Menlo, monospace",
       tabSize: 2,
       scrollBeyondLastLine: false,
     });
@@ -384,6 +389,34 @@ class HmEditor extends LitElement {
           );
         }
       })
+    );
+
+    // Apply editor settings (font, tab size, etc.)
+    // Listen on both channels: the dedicated message AND settings:current
+    // (the latter is already an established Tauri event channel, so it's
+    // reliable even when the dedicated listener registers late due to
+    // Monaco's async import).
+    const applyEditorSettings = (s) => {
+      if (!this._editor || !s) return;
+      const opts = {};
+      if (s.fontSize) opts.fontSize = s.fontSize;
+      if (s.fontFamily) opts.fontFamily = s.fontFamily;
+      if (s.tabSize) opts.tabSize = s.tabSize;
+      if (s.wordWrap !== undefined) opts.wordWrap = s.wordWrap ? 'on' : 'off';
+      if (s.minimap !== undefined) opts.minimap = { enabled: !!s.minimap };
+      if (s.lineNumbers !== undefined) opts.lineNumbers = s.lineNumbers ? 'on' : 'off';
+      this._editor.updateOptions(opts);
+      if (s.vimMode !== undefined && s.vimMode !== this.vimMode) {
+        this.vimMode = s.vimMode;
+        if (this.vimMode) this._enableVim();
+        else this._disableVim();
+      }
+    };
+    this._unsubs.push(
+      onMessage('editor:apply-settings', (msg) => applyEditorSettings(msg.settings))
+    );
+    this._unsubs.push(
+      onMessage('settings:current', (msg) => applyEditorSettings(msg.settings?.editor))
     );
 
     // Vim mode toggle

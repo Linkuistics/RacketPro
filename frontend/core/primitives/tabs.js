@@ -38,7 +38,7 @@ class HmTabs extends LitElement {
         system-ui,
         sans-serif
       );
-      font-size: 14px;
+      font-size: var(--ui-fs-lg);
       overflow: hidden;
       flex-shrink: 0;
       box-sizing: border-box;
@@ -122,7 +122,7 @@ class HmTabs extends LitElement {
       width: 20px;
       cursor: pointer;
       color: var(--fg-muted, #999999);
-      font-size: 16px;
+      font-size: var(--ui-fs-xl);
       user-select: none;
       flex-shrink: 0;
     }
@@ -146,7 +146,7 @@ class HmTabs extends LitElement {
     .ctx-item {
       padding: 4px 12px;
       cursor: pointer;
-      font-size: 13px;
+      font-size: var(--ui-fs);
     }
 
     .ctx-item:hover {

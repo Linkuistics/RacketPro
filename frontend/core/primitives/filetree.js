@@ -187,7 +187,7 @@ class HmFiletree extends LitElement {
       min-width: 140px;
       background: var(--bg-sidebar, #F8F8F8);
       font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif);
-      font-size: 14px;
+      font-size: var(--ui-fs-lg);
       color: var(--fg-sidebar, #333333);
       overflow-y: auto;
       overflow-x: hidden;
@@ -256,7 +256,7 @@ class HmFiletree extends LitElement {
     .loading {
       padding: 12px;
       color: var(--fg-muted, #999999);
-      font-size: 12px;
+      font-size: var(--ui-fs-md);
     }
   `;
 

@@ -53,7 +53,7 @@ class HmBreadcrumb extends LitElement {
       background: var(--bg-primary, #FFFFFF);
       border-bottom: 1px solid var(--border, #D4D4D4);
       font-family: var(--font-editor, "OperatorMonoSSm Nerd Font Mono", "SF Mono", Menlo, monospace);
-      font-size: 13px;
+      font-size: var(--ui-fs);
       font-weight: var(--font-editor-weight, 300);
       color: var(--fg-secondary, #616161);
       flex-shrink: 0;
@@ -227,7 +227,7 @@ class HmStatusbar extends LitElement {
       background: var(--bg-statusbar, #E8E8E8);
       border-top: 1px solid var(--border, #D4D4D4);
       font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif);
-      font-size: 14px;
+      font-size: var(--ui-fs-lg);
       color: var(--fg-statusbar, #616161);
       flex-shrink: 0;
       min-height: var(--statusbar-h, 28px);

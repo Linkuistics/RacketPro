@@ -138,6 +138,11 @@ fn handle_menu_set(app: &AppHandle, menu_data: &Value) {
         if let Ok(item) = PredefinedMenuItem::services(app, Some("Services")) {
             app_submenu = app_submenu.item(&item);
         }
+        // Settings (Cmd+,) — standard macOS location
+        match MenuItem::with_id(app, "settings", "Settings\u{2026}", true, Some("CmdOrCtrl+,")) {
+            Ok(item) => { app_submenu = app_submenu.item(&item); }
+            Err(e) => log::error!("Failed to create Settings item: {e}"),
+        }
         app_submenu = app_submenu.separator();
         if let Ok(item) = PredefinedMenuItem::hide(app, Some("Hide HeavyMental")) {
             app_submenu = app_submenu.item(&item);

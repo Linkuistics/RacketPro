@@ -267,9 +267,7 @@
             (hasheq 'label "Open..." 'shortcut "Cmd+O" 'action "open-file")
             (hasheq 'label "Save" 'shortcut "Cmd+S" 'action "save-file")
             (hasheq 'label "---")
-            (hasheq 'label "Find in Project..." 'shortcut "Cmd+Shift+F" 'action "find-in-project")
-            (hasheq 'label "---")
-            (hasheq 'label "Settings..." 'shortcut "Cmd+," 'action "settings")))
+            (hasheq 'label "Find in Project..." 'shortcut "Cmd+Shift+F" 'action "find-in-project")))
    (hasheq 'label "Edit"
            'children
            (list
@@ -455,6 +453,13 @@
      (send-message! (make-message "theme:list"
                                   'themes (list-themes)))
      (cell-set! 'status "Settings")]
+    ;; Settings request: components that initialise asynchronously
+    ;; (editor, terminal) ask for current settings after their listeners
+    ;; are registered, since the boot-time apply-settings messages may
+    ;; have arrived before the listeners existed.
+    [(string=? event-name "settings:request")
+     (send-message! (make-message "settings:current"
+                                  'settings (current-settings)))]
     ;; Settings panel: change a setting
     [(string=? event-name "settings:change")
      (define key (string->symbol (message-ref msg 'key "")))
@@ -463,13 +468,20 @@
      (cond
        [(and sub-key (hash? (settings-ref key)))
         (define current (settings-ref key))
-        (settings-set! key (hash-set current (string->symbol sub-key) value))]
+        (hash-set! current (string->symbol sub-key) value)
+        (save-settings!)]
        [else
         (settings-set! key value)])
-     ;; Apply editor settings changes live
+     ;; Apply settings changes live
      (when (eq? key 'editor)
        (send-message! (make-message "editor:apply-settings"
                                     'settings (settings-ref 'editor))))
+     (when (eq? key 'terminal)
+       (send-message! (make-message "terminal:apply-settings"
+                                    'settings (settings-ref 'terminal))))
+     (when (eq? key 'ui)
+       (send-message! (make-message "ui:apply-settings"
+                                    'settings (settings-ref 'ui))))
      ;; Send updated settings back to the panel
      (send-message! (make-message "settings:current"
                                   'settings (current-settings)))]
@@ -670,7 +682,14 @@
      ;; Apply theme from settings
      (define theme-name (settings-ref 'theme "Light"))
      (apply-theme! theme-name)
-     (cell-set! '_current-theme theme-name)]
+     (cell-set! '_current-theme theme-name)
+     ;; Push editor/terminal/UI settings to frontend
+     (send-message! (make-message "editor:apply-settings"
+                                  'settings (settings-ref 'editor (hasheq))))
+     (send-message! (make-message "terminal:apply-settings"
+                                  'settings (settings-ref 'terminal (hasheq))))
+     (send-message! (make-message "ui:apply-settings"
+                                  'settings (settings-ref 'ui (hasheq))))]
     [(string=? typ "ping")
      (send-message! (make-message "pong"))]
     [else

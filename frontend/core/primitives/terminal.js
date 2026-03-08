@@ -17,6 +17,7 @@
 //   pty:exit    — PTY process exited (filtered by pty-id)
 
 import { LitElement, html, css } from 'lit';
+import { onMessage, dispatch } from '../bridge.js';
 
 class HmTerminal extends LitElement {
   static properties = {
@@ -59,6 +60,8 @@ class HmTerminal extends LitElement {
     this._onDataDisposable = null;
     /** @type {import('@xterm/xterm').IDisposable|null} */
     this._linkProviderDisposable = null;
+    /** @type {Function|null} Unlisten for terminal settings. */
+    this._unsubSettings = null;
   }
 
   render() {
@@ -84,6 +87,11 @@ class HmTerminal extends LitElement {
       this._pendingOutput = null;
 
       this._setupResizeObserver();
+      this._setupSettingsListener();
+
+      // Request saved settings — the boot-time terminal:apply-settings
+      // message may have arrived before our listener was registered.
+      dispatch('settings:request', {});
 
       // Focus the terminal so the REPL is ready for input on startup
       this._terminal.focus();
@@ -111,7 +119,7 @@ class HmTerminal extends LitElement {
       cursorBlink: true,
       fontSize: 13,
       fontWeight: '300',
-      fontFamily: "'OperatorMonoSSm Nerd Font Mono', 'SF Mono', 'Fira Code', Menlo, monospace",
+      fontFamily: "'SF Mono', 'Fira Code', Menlo, monospace",
       theme: {
         background: '#FFFFFF',
         foreground: '#333333',
@@ -276,6 +284,28 @@ class HmTerminal extends LitElement {
     });
   }
 
+  /**
+   * Listen for terminal settings changes and apply them live.
+   */
+  _setupSettingsListener() {
+    const applyTerminalSettings = (s) => {
+      if (!this._terminal || !s) return;
+      if (s.fontSize) this._terminal.options.fontSize = s.fontSize;
+      if (s.fontFamily) this._terminal.options.fontFamily = s.fontFamily;
+      // Re-fit after font change (different font size = different grid)
+      if (this._fitAddon) {
+        this._fitAddon.fit();
+        this._reportResize();
+      }
+    };
+    this._unsubSettings = onMessage('terminal:apply-settings', (msg) => {
+      applyTerminalSettings(msg.settings);
+    });
+    this._unsubSettings2 = onMessage('settings:current', (msg) => {
+      applyTerminalSettings(msg.settings?.terminal);
+    });
+  }
+
   disconnectedCallback() {
     super.disconnectedCallback();
 
@@ -297,6 +327,16 @@ class HmTerminal extends LitElement {
     if (this._unlistenExit) {
       this._unlistenExit();
       this._unlistenExit = null;
+    }
+
+    // Unlisten settings
+    if (this._unsubSettings) {
+      this._unsubSettings();
+      this._unsubSettings = null;
+    }
+    if (this._unsubSettings2) {
+      this._unsubSettings2();
+      this._unsubSettings2 = null;
     }
 
     // Dispose xterm resources

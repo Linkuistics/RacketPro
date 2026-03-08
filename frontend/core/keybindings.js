@@ -76,8 +76,8 @@ export function initKeybindings() {
 
       // These shortcuts should always be captured (not editor-internal)
       const alwaysCapture = new Set([
-        'settings:open', 'find-in-project', 'new-file', 'open-file',
-        'run', 'step-through', 'expand-macros',
+        'settings', 'find-in-project', 'new-file', 'open-file',
+        'save-file', 'run', 'step-through', 'expand-macros',
       ]);
 
       if (inMonaco && !alwaysCapture.has(action)) {

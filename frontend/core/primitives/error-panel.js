@@ -20,25 +20,11 @@ class HmErrorPanel extends LitElement {
       overflow: auto;
       background: var(--bg-panel, #F5F5F5);
       font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
-      font-size: 12px;
+      font-size: var(--ui-fs-md);
     }
 
     :host([hidden]) {
       display: none;
-    }
-
-    .header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 4px 8px;
-      background: var(--bg-panel-header, #E8E8E8);
-      font-weight: 600;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: #555;
-      border-bottom: 1px solid #DDD;
     }
 
     .row {
@@ -74,7 +60,7 @@ class HmErrorPanel extends LitElement {
     .location {
       flex-shrink: 0;
       color: #888;
-      font-size: 11px;
+      font-size: var(--ui-fs-sm);
       padding-top: 1px;
     }
 
@@ -131,9 +117,6 @@ class HmErrorPanel extends LitElement {
   render() {
     const count = this.items.length;
     return html`
-      <div class="header">
-        <span>Problems ${count > 0 ? `(${count})` : ''}</span>
-      </div>
       ${count === 0
         ? html`<div class="empty">No problems detected.</div>`
         : this.items.map((item) => html`

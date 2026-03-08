@@ -17,7 +17,7 @@ class HmMacroPanel extends LitElement {
       overflow: hidden;
       background: var(--bg-primary, #FFFFFF);
       font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif);
-      font-size: 13px;
+      font-size: var(--ui-fs);
     }
 
     .toolbar {
@@ -41,7 +41,7 @@ class HmMacroPanel extends LitElement {
       background: var(--bg-primary, #FFFFFF);
       color: var(--fg-primary, #333333);
       cursor: pointer;
-      font-size: 12px;
+      font-size: var(--ui-fs-md);
       font-family: inherit;
     }
 
@@ -67,7 +67,7 @@ class HmMacroPanel extends LitElement {
     }
 
     .step-counter {
-      font-size: 12px;
+      font-size: var(--ui-fs-md);
       color: var(--fg-secondary, #616161);
       margin-left: auto;
     }
@@ -94,7 +94,7 @@ class HmMacroPanel extends LitElement {
       padding: 4px 10px;
       cursor: pointer;
       font-family: var(--font-editor, "SF Mono", Menlo, monospace);
-      font-size: 12px;
+      font-size: var(--ui-fs-md);
       font-weight: var(--font-editor-weight, 300);
       border-bottom: 1px solid var(--border-light, #EEEEEE);
     }
@@ -110,12 +110,12 @@ class HmMacroPanel extends LitElement {
 
     .step-num {
       color: var(--fg-muted, #999999);
-      font-size: 11px;
+      font-size: var(--ui-fs-sm);
       min-width: 24px;
     }
 
     .step-type {
-      font-size: 10px;
+      font-size: var(--ui-fs-xs);
       padding: 1px 4px;
       border-radius: 2px;
       background: var(--bg-panel, #F5F5F5);
@@ -154,7 +154,7 @@ class HmMacroPanel extends LitElement {
       border-radius: 3px;
       cursor: pointer;
       font-family: var(--font-editor, "SF Mono", Menlo, monospace);
-      font-size: 12px;
+      font-size: var(--ui-fs-md);
       font-weight: var(--font-editor-weight, 300);
     }
 
@@ -195,7 +195,7 @@ class HmMacroPanel extends LitElement {
     }
 
     .detail-label {
-      font-size: 11px;
+      font-size: var(--ui-fs-sm);
       font-weight: 600;
       color: var(--fg-muted, #999999);
       text-transform: uppercase;
@@ -209,7 +209,7 @@ class HmMacroPanel extends LitElement {
       border: 1px solid var(--border, #D4D4D4);
       border-radius: 4px;
       font-family: var(--font-editor, "SF Mono", Menlo, monospace);
-      font-size: 12px;
+      font-size: var(--ui-fs-md);
       font-weight: var(--font-editor-weight, 300);
       white-space: pre-wrap;
       word-break: break-word;
@@ -220,7 +220,7 @@ class HmMacroPanel extends LitElement {
     .info-row {
       display: flex;
       gap: 8px;
-      font-size: 12px;
+      font-size: var(--ui-fs-md);
       color: var(--fg-secondary, #616161);
       margin-bottom: 8px;
     }
@@ -254,7 +254,7 @@ class HmMacroPanel extends LitElement {
     }
 
     .filter-select {
-      font-size: 12px;
+      font-size: var(--ui-fs-md);
       border: 1px solid var(--border, #D4D4D4);
       border-radius: 3px;
       padding: 2px 4px;
@@ -268,11 +268,11 @@ class HmMacroPanel extends LitElement {
       border: 1px solid #A5D6A7;
       border-radius: 4px;
       font-family: var(--font-editor, "SF Mono", Menlo, monospace);
-      font-size: 12px;
+      font-size: var(--ui-fs-md);
     }
 
     .pattern-source {
-      font-size: 11px;
+      font-size: var(--ui-fs-sm);
       color: var(--fg-muted, #999999);
       margin-top: 4px;
     }
@@ -642,7 +642,7 @@ class HmMacroPanel extends LitElement {
       ${node.children && node.children.length > 0 ? html`
         <div class="detail-section">
           <div class="detail-label">Children</div>
-          <div style="font-size: 12px; color: var(--fg-secondary, #616161);">
+          <div style="font-size: var(--ui-fs-md); color: var(--fg-secondary, #616161);">
             ${node.children.length} sub-expansion${node.children.length > 1 ? 's' : ''}
           </div>
         </div>
@@ -667,7 +667,7 @@ class HmMacroPanel extends LitElement {
     if (!hasData) {
       return html`
         <div class="toolbar">
-          <span style="color: var(--fg-muted, #999); font-size: 12px;">
+          <span style="color: var(--fg-muted, #999); font-size: var(--ui-fs-md);">
             Use Expand Macros (Cmd+Shift+E) to view macro expansions
           </span>
         </div>

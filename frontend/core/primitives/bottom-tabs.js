@@ -25,7 +25,7 @@ class HmBottomTabs extends LitElement {
       border-top: 1px solid var(--border, #D4D4D4);
       border-bottom: 1px solid var(--border, #D4D4D4);
       font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif);
-      font-size: 11px;
+      font-size: var(--ui-fs-sm);
       text-transform: uppercase;
       letter-spacing: 0.5px;
       flex-shrink: 0;
@@ -63,7 +63,7 @@ class HmBottomTabs extends LitElement {
       border-radius: 8px;
       background: var(--accent, #007ACC);
       color: white;
-      font-size: 10px;
+      font-size: var(--ui-fs-xs);
       line-height: 1;
     }
   `;

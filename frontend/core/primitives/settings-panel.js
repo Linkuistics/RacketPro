@@ -8,7 +8,6 @@ export class HmSettingsPanel extends LitElement {
     activeSection: { type: String },
     settings: { type: Object },
     themes: { type: Array },
-    keybindings: { type: Object },
     recordingAction: { type: String },
     keybindingFilter: { type: String },
   };
@@ -20,7 +19,7 @@ export class HmSettingsPanel extends LitElement {
       background: var(--bg-primary, #fff);
       color: var(--fg-primary, #333);
       font-family: var(--font-sans);
-      font-size: 13px;
+      font-size: var(--ui-fs);
     }
     nav {
       width: 180px;
@@ -37,7 +36,7 @@ export class HmSettingsPanel extends LitElement {
       color: var(--fg-primary, #333);
       text-align: left;
       cursor: pointer;
-      font-size: 13px;
+      font-size: var(--ui-fs);
       font-family: var(--font-sans);
     }
     nav button:hover {
@@ -53,9 +52,15 @@ export class HmSettingsPanel extends LitElement {
       overflow-y: auto;
     }
     h2 {
-      font-size: 18px;
+      font-size: var(--ui-fs-2xl);
       margin-bottom: 16px;
       font-weight: 600;
+    }
+    h3 {
+      font-size: var(--ui-fs-lg);
+      margin: 16px 0 8px;
+      font-weight: 600;
+      color: var(--fg-secondary, #616161);
     }
     .setting-row {
       display: flex;
@@ -68,7 +73,7 @@ export class HmSettingsPanel extends LitElement {
       font-weight: 500;
     }
     .setting-desc {
-      font-size: 11px;
+      font-size: var(--ui-fs-sm);
       color: var(--fg-muted, #999);
       margin-top: 2px;
     }
@@ -78,9 +83,11 @@ export class HmSettingsPanel extends LitElement {
       border-radius: 3px;
       background: var(--bg-primary, #fff);
       color: var(--fg-primary, #333);
-      font-size: 13px;
+      font-size: var(--ui-fs);
       font-family: var(--font-sans);
     }
+    input[type="number"] { width: 64px; }
+    input[type="text"] { width: 240px; }
     .toggle {
       position: relative;
       width: 36px;
@@ -122,7 +129,7 @@ export class HmSettingsPanel extends LitElement {
       padding: 6px 8px;
       border-bottom: 2px solid var(--border, #d4d4d4);
       font-weight: 600;
-      font-size: 12px;
+      font-size: var(--ui-fs-md);
       color: var(--fg-secondary, #616161);
     }
     .kb-table td {
@@ -134,7 +141,7 @@ export class HmSettingsPanel extends LitElement {
       padding: 2px 8px;
       border-radius: 3px;
       font-family: var(--font-mono);
-      font-size: 12px;
+      font-size: var(--ui-fs-md);
       background: var(--bg-secondary, #f3f3f3);
       display: inline-block;
     }
@@ -155,7 +162,7 @@ export class HmSettingsPanel extends LitElement {
       background: transparent;
       color: var(--fg-muted, #999);
       cursor: pointer;
-      font-size: 11px;
+      font-size: var(--ui-fs-sm);
     }
     .kb-reset:hover {
       color: var(--danger, #d32f2f);
@@ -167,7 +174,6 @@ export class HmSettingsPanel extends LitElement {
     this.activeSection = 'appearance';
     this.settings = {};
     this.themes = ['Light', 'Dark'];
-    this.keybindings = {};
     this.recordingAction = null;
     this.keybindingFilter = '';
 
@@ -217,7 +223,7 @@ export class HmSettingsPanel extends LitElement {
 
   _renderAppearance() {
     const theme = this.settings.theme || 'Light';
-    const editor = this.settings.editor || {};
+    const ui = this.settings.ui || {};
 
     return html`
       <h2>Appearance</h2>
@@ -234,19 +240,11 @@ export class HmSettingsPanel extends LitElement {
       </div>
       <div class="setting-row">
         <div>
-          <div class="setting-label">Font Family</div>
-          <div class="setting-desc">Editor font family</div>
+          <div class="setting-label">UI Font Size</div>
+          <div class="setting-desc">Font size for menus, tabs, status bar, and panels</div>
         </div>
-        <input type="text" .value=${editor.fontFamily || 'SF Mono'}
-          @change=${(e) => this._changeSetting('editor', 'fontFamily', e.target.value)} />
-      </div>
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">Font Size</div>
-          <div class="setting-desc">Editor font size in pixels</div>
-        </div>
-        <input type="number" min="8" max="32" .value=${String(editor.fontSize || 13)}
-          @change=${(e) => this._changeSetting('editor', 'fontSize', Number(e.target.value))} />
+        <input type="number" min="10" max="24" .value=${String(ui.fontSize || 13)}
+          @input=${(e) => this._changeSetting('ui', 'fontSize', Number(e.target.value))} />
       </div>
     `;
   }
@@ -256,6 +254,24 @@ export class HmSettingsPanel extends LitElement {
 
     return html`
       <h2>Editor</h2>
+      <h3>Font</h3>
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">Font Family</div>
+          <div class="setting-desc">CSS font-family for the code editor</div>
+        </div>
+        <input type="text" .value=${editor.fontFamily || "'SF Mono', Menlo, monospace"}
+          @input=${(e) => this._changeSetting('editor', 'fontFamily', e.target.value)} />
+      </div>
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">Font Size</div>
+        </div>
+        <input type="number" min="8" max="32" .value=${String(editor.fontSize || 13)}
+          @input=${(e) => this._changeSetting('editor', 'fontSize', Number(e.target.value))} />
+      </div>
+
+      <h3>Behavior</h3>
       <div class="setting-row">
         <div>
           <div class="setting-label">Vim Mode</div>
@@ -265,32 +281,47 @@ export class HmSettingsPanel extends LitElement {
           @click=${() => this._changeSetting('editor', 'vimMode', !editor.vimMode)}></div>
       </div>
       <div class="setting-row">
-        <div>
-          <div class="setting-label">Tab Size</div>
-        </div>
+        <div><div class="setting-label">Tab Size</div></div>
         <input type="number" min="1" max="8" .value=${String(editor.tabSize || 2)}
-          @change=${(e) => this._changeSetting('editor', 'tabSize', Number(e.target.value))} />
+          @input=${(e) => this._changeSetting('editor', 'tabSize', Number(e.target.value))} />
       </div>
       <div class="setting-row">
-        <div>
-          <div class="setting-label">Word Wrap</div>
-        </div>
+        <div><div class="setting-label">Word Wrap</div></div>
         <div class="toggle ${editor.wordWrap ? 'on' : ''}"
           @click=${() => this._changeSetting('editor', 'wordWrap', !editor.wordWrap)}></div>
       </div>
       <div class="setting-row">
-        <div>
-          <div class="setting-label">Minimap</div>
-        </div>
+        <div><div class="setting-label">Minimap</div></div>
         <div class="toggle ${editor.minimap ? 'on' : ''}"
           @click=${() => this._changeSetting('editor', 'minimap', !editor.minimap)}></div>
       </div>
       <div class="setting-row">
-        <div>
-          <div class="setting-label">Line Numbers</div>
-        </div>
+        <div><div class="setting-label">Line Numbers</div></div>
         <div class="toggle ${editor.lineNumbers !== false ? 'on' : ''}"
           @click=${() => this._changeSetting('editor', 'lineNumbers', !(editor.lineNumbers !== false))}></div>
+      </div>
+    `;
+  }
+
+  _renderTerminal() {
+    const terminal = this.settings.terminal || {};
+
+    return html`
+      <h2>Terminal</h2>
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">Font Family</div>
+          <div class="setting-desc">CSS font-family for the terminal</div>
+        </div>
+        <input type="text" .value=${terminal.fontFamily || "'SF Mono', Menlo, monospace"}
+          @input=${(e) => this._changeSetting('terminal', 'fontFamily', e.target.value)} />
+      </div>
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">Font Size</div>
+        </div>
+        <input type="number" min="8" max="32" .value=${String(terminal.fontSize || 13)}
+          @input=${(e) => this._changeSetting('terminal', 'fontSize', Number(e.target.value))} />
       </div>
     `;
   }
@@ -342,6 +373,7 @@ export class HmSettingsPanel extends LitElement {
     const sections = [
       { id: 'appearance', label: 'Appearance' },
       { id: 'editor', label: 'Editor' },
+      { id: 'terminal', label: 'Terminal' },
       { id: 'keybindings', label: 'Keybindings' },
     ];
 
@@ -355,6 +387,7 @@ export class HmSettingsPanel extends LitElement {
       <div class="content">
         ${this.activeSection === 'appearance' ? this._renderAppearance() : ''}
         ${this.activeSection === 'editor' ? this._renderEditor() : ''}
+        ${this.activeSection === 'terminal' ? this._renderTerminal() : ''}
         ${this.activeSection === 'keybindings' ? this._renderKeybindings() : ''}
       </div>
     `;

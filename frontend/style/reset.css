@@ -30,6 +30,14 @@
   --font-editor:      "OperatorMonoSSm Nerd Font Mono", "SF Mono", "Fira Code", Menlo, monospace;
   --font-editor-size: 13px;
   --font-editor-weight: 300;
+  --ui-font-size:     13px;
+  --ui-fs-xs:         calc(var(--ui-font-size) - 3px);  /* 10px at default */
+  --ui-fs-sm:         calc(var(--ui-font-size) - 2px);  /* 11px at default */
+  --ui-fs-md:         calc(var(--ui-font-size) - 1px);  /* 12px at default */
+  --ui-fs:            var(--ui-font-size);               /* 13px at default */
+  --ui-fs-lg:         calc(var(--ui-font-size) + 1px);  /* 14px at default */
+  --ui-fs-xl:         calc(var(--ui-font-size) + 3px);  /* 16px at default */
+  --ui-fs-2xl:        calc(var(--ui-font-size) + 5px);  /* 18px at default */
 
   /* Sidebar / File Tree */
   --sidebar-width:    220px;
@@ -78,6 +86,7 @@ html, body {
   height: 100%;
   overflow: hidden;
   font-family: var(--font-sans);
+  font-size: var(--ui-font-size);
   background: var(--bg-secondary);
   color: var(--fg-primary);
 }
