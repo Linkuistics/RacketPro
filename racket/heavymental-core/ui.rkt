@@ -7,14 +7,16 @@
 ;; Usage:
 ;;   (ui (vbox (text #:content "hello")))
 ;;   =>
-;;   (hasheq 'type "hm-vbox"
+;;   (hasheq 'type "vbox"
 ;;           'props (hasheq)
-;;           'children (list (hasheq 'type "hm-text"
+;;           'children (list (hasheq 'type "text"
 ;;                                   'props (hasheq 'content "hello")
 ;;                                   'children (list))))
 ;;
+;; The renderer adds the "hm-" prefix when creating DOM elements,
+;; so layout types use bare names (matching main.rkt convention).
+;;
 ;; Features:
-;; - Auto-prefixes "hm-" to element type names
 ;; - Keyword args become props: #:key val => 'key val
 ;; - Non-keyword args are children, recursively processed
 ;; - Unquote (,expr) splices pre-built nodes
@@ -49,9 +51,8 @@
               (loop (cdr remaining)
                     props-acc
                     (cons (car remaining) children-acc))])))
-       ;; Build the type string
-       (define type-str
-         (string-append "hm-" (symbol->string (syntax-e #'elem-type))))
+       ;; Build the type string (bare name — renderer adds "hm-" prefix)
+       (define type-str (symbol->string (syntax-e #'elem-type)))
        ;; Build props hasheq: alternating 'key val pairs
        ;; Each prop-pair is (list #:key-stx val-stx)
        ;; We need to produce (hasheq 'key1 val1 'key2 val2 ...)
