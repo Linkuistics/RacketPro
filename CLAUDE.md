@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-HeavyMental — a Racket-driven IDE (DrRacket replacement) built on Tauri. Racket is the brain: it declares UI, manages state, handles events, controls menus. Rust/Tauri is a thin bridge that spawns Racket, routes JSON-RPC over stdin/stdout, and provides OS access. The frontend is a rendering surface using Lit Web Components + @preact/signals-core. No framework, no build step.
+RacketPro (internally "HeavyMental") — a Racket-driven IDE built on Tauri. Racket is the brain: it declares UI, manages state, handles events, controls menus. Rust/Tauri is a thin bridge that spawns Racket, routes JSON-RPC over stdin/stdout, and provides OS access. The frontend is a rendering surface using Lit Web Components + @preact/signals-core. No framework, no build step.
 
 ## Commands
 
@@ -19,6 +19,20 @@ cargo tauri build
 racket test/test-bridge.rkt
 racket test/test-phase2.rkt
 racket test/test-lang-intel.rkt
+racket test/test-stepper.rkt
+racket test/test-macro-expander.rkt
+racket test/test-pattern-extractor.rkt
+racket test/test-extension.rkt
+racket test/test-extend-lang.rkt
+racket test/test-component.rkt
+racket test/test-ui.rkt
+racket test/test-keybindings.rkt
+racket test/test-settings.rkt
+racket test/test-theme.rkt
+racket test/test-project.rkt
+racket test/test-rhombus.rkt
+racket test/test-phase4.rkt
+racket test/test-phase5b-integration.rkt
 
 # Run a single test file
 racket test/test-bridge.rkt
@@ -66,15 +80,27 @@ Racket runs `drracket/check-syntax` on source code → extracts arrows, hovers, 
 
 | File | Role |
 |------|------|
-| `src-tauri/src/bridge.rs` | Rust bridge: spawns Racket, JSON-RPC routing, native menus |
-| `src-tauri/src/pty.rs` | PTY process management (portable-pty) |
-| `racket/heavymental-core/main.rkt` | Racket entry: layout declaration, event dispatcher |
+| `src-tauri/src/lib.rs` | Tauri setup, command handlers, PATH augmentation for macOS bundles |
+| `src-tauri/src/bridge.rs` | Rust bridge: spawns Racket, JSON-RPC routing, native menus, file I/O, dialogs |
+| `src-tauri/src/pty.rs` | PTY process management (portable-pty) with generation tracking |
+| `src-tauri/src/search.rs` | Project-wide text search (ignore + regex crates) |
+| `src-tauri/src/settings.rs` | Settings persistence to ~/Library/Application Support/ |
+| `racket/heavymental-core/main.rkt` | Racket entry: cells, layout, menu, event/menu dispatch, startup sequence |
 | `racket/heavymental-core/protocol.rkt` | JSON message primitives: `send-message!`, `read-message`, `make-message` |
-| `racket/heavymental-core/lang-intel.rkt` | Check-syntax integration: `analyze-source`, `build-trace%`, offset conversion |
-| `racket/heavymental-core/editor.rkt` | File ops, `#lang` detection, language detection |
+| `racket/heavymental-core/cell.rkt` | Reactive cell system: `define-cell`, `cell-set!`, `cell-ref` |
+| `racket/heavymental-core/editor.rkt` | File ops, `#lang` detection, dirty tracking, pending actions |
+| `racket/heavymental-core/repl.rkt` | REPL lifecycle: start, run-file, restart, language switching |
+| `racket/heavymental-core/lang-intel.rkt` | Check-syntax integration: `analyze-source`, `build-trace%`, intel cache |
+| `racket/heavymental-core/stepper.rkt` | Interactive stepper using `stepper/private/model` |
+| `racket/heavymental-core/macro-expander.rkt` | Macro expansion tracing using `macro-debugger` |
+| `racket/heavymental-core/extension.rkt` | Extension system: load/unload/reload, namespacing, live-watch |
+| `racket/heavymental-core/ui.rkt` | Declarative UI DSL macro with auto-handler registration |
+| `racket/heavymental-core/theme.rkt` | Theme system: Light/Dark built-in, `register-theme!` API |
+| `racket/heavymental-core/keybindings.rkt` | Keybinding registry with defaults and customization |
 | `frontend/core/bridge.js` | Tauri IPC wrapper: `onMessage()`, `dispatch()`, `request()` |
-| `frontend/core/renderer.js` | Layout tree → DOM: creates `hm-*` elements from Racket layout |
+| `frontend/core/renderer.js` | Layout tree to DOM with ID-based diffing |
 | `frontend/core/lang-intel.js` | Intel cache + Monaco providers (diagnostics, hover, definition, completion) |
+| `frontend/core/arrows.js` | SVG Bezier binding arrows overlay on Monaco |
 | `frontend/core/primitives/editor.js` | Monaco editor wrapper, language registration, document sync |
 
 ## Conventions

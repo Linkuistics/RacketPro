@@ -41,7 +41,7 @@ DrRacket is excellent for learning, but professional language development demand
 
 ### Editor and Environment
 
-- **Monaco code editor** -- syntax highlighting for Racket and Rhombus with custom language definitions, Vim mode support, configurable font/tab/wrap/minimap settings
+- **Monaco code editor** -- syntax highlighting for Racket and Rhombus with custom language definitions, configurable font/tab/wrap/minimap settings, vim mode scaffold (toggle in settings, library not yet vendored)
 - **Integrated terminal** -- xterm.js terminal connected to a Racket REPL via PTY, with automatic resize and language-aware restart
 - **File tree** -- project directory browser with lazy-loaded directory listing
 - **Multi-tab editing** -- tab bar with dirty indicators, save-before-close dialogs, and tab management
@@ -107,7 +107,8 @@ RacketPro/
 │       ├── keybindings.rkt    # Keybinding management with defaults and overrides
 │       ├── settings.rkt       # Settings: defaults, persistence, deep merge
 │       ├── theme.rkt          # Theme system: Light/Dark built-in, register custom themes
-│       └── project.rkt        # Project root detection via info.rkt, collection name
+│       ├── project.rkt        # Project root detection via info.rkt, collection name
+│       └── extend/            # #lang heavymental/extend reader for simplified extension authoring
 ├── frontend/
 │   ├── index.html             # Entry point: import map, Monaco worker stub, debug harness
 │   ├── core/

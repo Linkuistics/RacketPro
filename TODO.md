@@ -4,197 +4,357 @@ Each item below is a self-contained Claude Code prompt. Copy the full text of a 
 
 ---
 
-## Transition to APIAnyware-MacOS
+## Rename internal HeavyMental references to RacketPro
 
-### Replace Tauri bridge with APIAnyware-MacOS native bindings
-
-```
-The RacketPro IDE at /Users/antony/Development/RacketPro currently uses a Tauri/Rust
-bridge (src-tauri/) to spawn Racket, route JSON-RPC messages, manage PTY processes,
-handle file I/O, and render native menus. The long-term architecture replaces this
-with APIAnyware-MacOS bindings so Racket directly accesses macOS APIs (AppKit, WebKit,
-Foundation) without an intermediary.
-
-Investigate APIAnyware-MacOS at https://github.com/linkuistics/APIAnyware-MacOS and
-create a migration plan. Identify which Rust bridge responsibilities can be replaced
-by direct Racket-to-macOS calls via APIAnyware. Start with the simplest subsystem
-(e.g., native menus or file dialogs) as a proof-of-concept.
-```
-
----
-
-## Language Intelligence Improvements
-
-### Add debounced re-analysis on the Racket side
+The repository is called RacketPro but the internal product name is "HeavyMental" everywhere. This creates confusion for users and contributors.
 
 ```
-In /Users/antony/Development/RacketPro, the language intelligence system
-(racket/heavymental-core/lang-intel.rkt) re-runs check-syntax on every
-document:changed event. The frontend debounces edits, but the Racket side has no
-debouncing -- rapid saves or automated edits can queue multiple expensive analyses.
+Audit every occurrence of "HeavyMental" and "heavymental" across the RacketPro
+codebase at /Users/antony/Development/RacketPro and rename to "RacketPro" and
+"racketpro" respectively. Key locations:
 
-Add a debounce mechanism in lang-intel.rkt: when handle-document-changed is called,
-cancel any pending analysis for the same URI and schedule a new one after 300ms of
-inactivity. Use a thread + sleep approach similar to the extension reload debounce
-in extension.rkt.
-```
+- src-tauri/Cargo.toml: package name "heavy-mental", lib name "heavy_mental_lib"
+- src-tauri/tauri.conf.json: productName "HeavyMental", identifier
+  "com.linkuistics.heavymental", bundle descriptions
+- src-tauri/src/main.rs: heavy_mental_lib::run()
+- src-tauri/src/bridge.rs: menu labels "About HeavyMental", "Hide HeavyMental",
+  "Quit HeavyMental"
+- src-tauri/src/settings.rs: path "com.linkuistics.heavymental"
+- src-tauri/src/debug.rs: path "/tmp/heavymental-debug/"
+- racket/heavymental-core/: directory name
+- racket/heavymental-core/info.rkt: collection "heavymental", pkg-desc
+- racket/heavymental-core/main.rkt: cell title default "HeavyMental", title
+  format strings "HeavyMental -- filename"
+- racket/heavymental-core/editor.rkt: title format strings with "HeavyMental"
+- frontend/index.html: <title>HeavyMental</title>
+- CLAUDE.md: all references
+- extensions/ files: require paths heavymental/extension, heavymental/cell,
+  heavymental/ui
+- test/ files: relative require paths to ../racket/heavymental-core/
 
-### Add Typed Racket intelligence support
-
-```
-In /Users/antony/Development/RacketPro, the language intelligence pipeline
-(racket/heavymental-core/lang-intel.rkt) treats all #lang variants that start with
-"typed/" as plain "racket". Enhance the pipeline to properly handle #lang typed/racket
-files -- the check-syntax integration already works, but type-hover information and
-type-error diagnostics could be richer. Investigate whether typed/racket's check-syntax
-annotations include type information in the hover text, and if not, whether we can
-extract it from the expansion.
+Rename the racket/heavymental-core/ directory to racket/racketpro-core/ and
+update all paths. Update the Racket info.rkt collection name. Update every
+require that references heavymental. Run all tests after renaming. Build with
+cargo tauri dev to verify the app launches correctly.
 ```
 
 ---
 
-## Stepper and Macro Expander
+## Vendor monaco-vim for functional vim mode
 
-### Add Rhombus stepper support
+The vim mode toggle exists in the settings panel and `frontend/core/primitives/editor.js` has full scaffolding, but `frontend/vendor/monaco-vim/index.js` is a placeholder stub that logs a warning.
+
+```
+Vendor the monaco-vim library into /Users/antony/Development/RacketPro/frontend/vendor/monaco-vim/.
+The current index.js is a placeholder stub. Download or build the ESM bundle from
+https://github.com/brijeshb42/monaco-vim and replace the stub. The editor
+component (frontend/core/primitives/editor.js) already imports it dynamically
+via `import('../../vendor/monaco-vim/index.js')` and calls `initVimMode(editor,
+statusEl)`. Verify it works with `cargo tauri dev` by toggling vim mode in the
+settings panel. Once working, update the README.md vim mode description to
+remove the "not yet vendored" note.
+```
+
+---
+
+## Transition from Tauri to APIAnyware-MacOS
+
+The architecture goal is to replace the Tauri/Rust bridge with direct APIAnyware-MacOS bindings so Racket drives native macOS APIs without an intermediary.
+
+```
+Begin the transition from Tauri to APIAnyware-MacOS bindings in
+/Users/antony/Development/RacketPro. The current architecture has three layers
+(Frontend <-> Rust/Tauri <-> Racket) and the goal is two layers (Frontend <->
+Racket via APIAnyware-MacOS). Start by:
+
+1. Investigate APIAnyware-MacOS at https://github.com/linkuistics/APIAnyware-MacOS
+2. Identify which Rust bridge responsibilities can be replaced:
+   - Spawning WebKit windows (WKWebView)
+   - Evaluating JavaScript in the WebView
+   - Native menu construction (NSMenu/NSMenuItem)
+   - File dialogs (NSOpenPanel/NSSavePanel)
+   - PTY management (posix_openpt)
+   - Filesystem operations
+   - Settings persistence
+3. Create a proof-of-concept that opens a WebKit window from Racket using
+   APIAnyware-MacOS and loads the existing frontend/index.html
+4. Implement the JSON message bridge directly from Racket (replacing bridge.rs)
+
+The frontend should remain unchanged -- it already communicates via a bridge
+abstraction (frontend/core/bridge.js) that can be re-targeted.
+```
+
+---
+
+## Add Racket-side analysis debouncing
+
+The language intelligence system re-runs `check-syntax` on every `document:changed` event. The frontend debounces edits, but the Racket side has no debouncing.
+
+```
+In /Users/antony/Development/RacketPro, add a debounce mechanism to
+racket/heavymental-core/lang-intel.rkt. When handle-document-changed is called,
+cancel any pending analysis for the same URI and schedule a new one after 300ms
+of inactivity. Use a thread + sleep approach similar to the extension reload
+debounce in extension.rkt (see handle-extension-file-change). Store pending
+analysis threads in a hash keyed by URI. Cancel (kill-thread) and replace on
+each new change event.
+```
+
+---
+
+## Add Typed Racket intelligence support
+
+Check-syntax works for `#lang typed/racket` but type information could be richer.
+
+```
+In /Users/antony/Development/RacketPro, enhance the language intelligence
+pipeline (racket/heavymental-core/lang-intel.rkt) for #lang typed/racket.
+Currently all typed/* langs map to "racket" in editor.rkt. Investigate:
+1. Whether check-syntax annotations from typed/racket include type information
+   in the hover text (syncheck:add-mouse-over-status)
+2. Whether typed/racket type errors produce useful source locations via
+   exn:fail:syntax?
+3. If type hovers aren't provided by check-syntax, explore using
+   typed-racket/optimizer/tool/tool to extract type information
+Add test cases in test/test-lang-intel.rkt with a typed/racket source string.
+```
+
+---
+
+## Add Rhombus stepper support
+
+The stepper currently rejects Rhombus files with an error message.
 
 ```
 In /Users/antony/Development/RacketPro, the algebraic stepper
-(racket/heavymental-core/stepper.rkt) currently only supports #lang racket files.
-When a Rhombus file is selected, it shows an error message. Investigate whether
-Racket's stepper/private/model can be used with Rhombus programs, or whether a
-different approach is needed. If Rhombus stepping is feasible, implement it.
-If not, document the technical limitation clearly.
-```
-
-### Improve macro expander pattern extraction
-
-```
-In /Users/antony/Development/RacketPro, the pattern extractor
-(racket/heavymental-core/pattern-extractor.rkt) currently handles
-define-syntax-rule and define-syntax-parse-rule. Extend it to also handle
-syntax-case and syntax-parse based macros (the common define-syntax + syntax-case
-pattern). These are widely used in real Racket code and currently produce no
-pattern information in the macro expansion panel.
+(racket/heavymental-core/stepper.rkt) only supports #lang racket. When a
+Rhombus file is selected, main.rkt shows "The stepper is not yet supported for
+Rhombus files." Investigate whether Racket's stepper/private/model can process
+Rhombus programs (Rhombus compiles through the Racket expander). If feasible,
+implement it. If not, document the technical limitation. The stepper uses
+read-syntax to read forms after skipping the #lang line, which won't work for
+Rhombus's shrubbery syntax -- a different reader would be needed.
 ```
 
 ---
 
-## UI and UX
+## Improve macro expander pattern extraction
 
-### Add file rename and delete support in the file tree
-
-```
-In /Users/antony/Development/RacketPro, the file tree component
-(frontend/core/primitives/filetree.js) supports opening files but not renaming
-or deleting them. Add right-click context menu support to the file tree with
-Rename and Delete options. The rename operation should use a native dialog for
-the new name. The delete operation should show a confirmation dialog. Both
-operations need corresponding Rust bridge handlers in src-tauri/src/bridge.rs
-and fs.rs, with messages routed through the standard JSON-RPC protocol.
-```
-
-### Add split editor (side-by-side editing)
+The pattern extractor only handles `define-syntax-rule` and `define-syntax-parse-rule`.
 
 ```
-In /Users/antony/Development/RacketPro, the layout currently supports a single
-editor pane. Add support for split editor views -- the user should be able to
-open a second editor pane showing a different file side-by-side. This requires:
-1. A new "split-editor" menu action and keybinding
-2. Layout modification in main.rkt to support multiple editor nodes
-3. Tab management updates in editor.rkt to track which editor pane is active
-4. Frontend support for multiple hm-editor instances with independent Monaco editors
-```
-
-### Add breadcrumb path navigation
-
-```
-In /Users/antony/Development/RacketPro, the layout includes a breadcrumb component
-(type "breadcrumb" in main.rkt) that shows the current file path relative to the
-project root. Verify it renders correctly and add clickable path segments that
-navigate to parent directories in the file tree. The breadcrumb should also show
-action buttons for Run and Step Through for quick access.
+In /Users/antony/Development/RacketPro, extend the pattern extractor
+(racket/heavymental-core/pattern-extractor.rkt) to also handle:
+1. define-syntax + syntax-case macros (the common pattern)
+2. define-syntax + syntax-parse macros
+3. define-simple-macro
+These are widely used in real Racket code and currently produce no pattern
+information in the macro expansion panel. The extractor reads S-expressions
+from the source file, so new matchers should follow the existing
+match-define-syntax-rule pattern using racket/match. Add test cases in
+test/test-pattern-extractor.rkt.
 ```
 
 ---
 
-## Testing
+## Add file rename and delete in the file tree
 
-### Expand E2E test coverage
-
-```
-In /Users/antony/Development/RacketPro, there are E2E tests in test/e2e-app/
-that test boot, file tree, editor, tabs, REPL, stepper, breadcrumb, layout,
-statusbar, editor content, diagnostics, semantic colors, dirty indicators,
-terminal output, intel roundtrip, and multi-file workflow. Review the existing
-test coverage and add tests for:
-1. Macro expander panel (expand macros on a file with define-syntax-rule)
-2. Extension loading and unloading
-3. Project search (Cmd+Shift+F workflow)
-4. Settings panel (open, change a setting, verify persistence)
-5. Theme switching (Light to Dark and back)
-6. Keybinding customization
-```
-
-### Add Racket unit tests for settings and theme modules
+The file tree only supports opening files.
 
 ```
-In /Users/antony/Development/RacketPro, the test/ directory has test files for
-most Racket modules but test-settings.rkt and test-theme.rkt may need expansion.
-Review test/test-settings.rkt and test/test-theme.rkt. Ensure they cover:
-- settings: deep-merge behavior, apply-loaded-settings!, settings-ref with defaults
-- theme: register-theme!, get-theme, list-themes, custom theme registration
-Add any missing coverage.
+In /Users/antony/Development/RacketPro, add right-click context menu support
+to the file tree (frontend/core/primitives/filetree.js) with Rename, Delete,
+and New File options. Implementation:
+1. Add a context menu Web Component or use native context menus
+2. Rename: dispatch an event to Racket, which sends a file:rename message
+   to Rust, which performs the fs::rename
+3. Delete: show a confirmation dialog, then dispatch file:delete
+4. New File: prompt for name, then dispatch file:create
+5. Add corresponding handlers in src-tauri/src/bridge.rs for file:rename,
+   file:delete, and file:create message types
+6. After mutations, the file tree should refresh
 ```
 
 ---
 
-## Build and Distribution
+## Add split editor (side-by-side editing)
 
-### Set up CI pipeline
-
-```
-In /Users/antony/Development/RacketPro, there is no CI configuration. Create a
-GitHub Actions workflow (.github/workflows/ci.yml) that:
-1. Installs Rust, Racket, and drracket-tool-lib
-2. Runs all Racket unit tests (racket test/test-*.rkt)
-3. Builds the Tauri app (cargo tauri build)
-4. Caches Rust and Racket dependencies for faster runs
-Target macOS runners since the app requires WKWebView.
-```
-
-### Create DMG installer with branding
+The layout supports only a single editor pane.
 
 ```
-In /Users/antony/Development/RacketPro, the Tauri build produces a DMG but
-uses default Tauri icons. Create branded app icons for RacketPro and update
-src-tauri/icons/. The DMG should show the RacketPro icon and a drag-to-Applications
-layout. Update src-tauri/tauri.conf.json with correct product name, bundle
-identifier, and descriptions that reference "RacketPro" for the public-facing name.
+In /Users/antony/Development/RacketPro, add support for split editor views.
+The user should be able to open a second editor pane showing a different file
+side-by-side. This requires:
+1. A new "split-editor" menu action and keybinding in main.rkt
+2. Layout modification in main.rkt to dynamically insert a second editor node
+   inside an hm-split
+3. Editor state tracking: editor.rkt must track which editor pane is active
+   and route file:read:result and editor:goto to the correct pane
+4. Tab management: tabs should indicate which pane they belong to
+5. Frontend: ensure multiple hm-editor instances with independent Monaco
+   editors can coexist (they currently can, but test thoroughly)
 ```
 
 ---
 
-## Extension Ecosystem
+## Add Scribble documentation support
 
-### Create extension development guide and template
-
-```
-In /Users/antony/Development/RacketPro, the extensions/ directory contains example
-extensions (counter, timer, file-watcher, calc-lang, etc.) that demonstrate the
-extension API. Create a comprehensive extension development guide as a template
-extension with detailed comments explaining every feature of define-extension:
-cells, panels, events, menus, on-activate/on-deactivate hooks, the ui macro for
-building layouts, filesystem watching, and live reload behavior. Include examples
-of each feature. Put the template at extensions/template-extension.rkt.
-```
-
-### Add extension marketplace/registry concept
+Racket's documentation is written in Scribble. The editor detects `.scrbl` as "racket" but has no Scribble-specific support.
 
 ```
-In /Users/antony/Development/RacketPro, extensions are currently loaded from local
-.rkt files via a file dialog. Design and implement an extension registry that:
-1. Scans a known directory (~/.config/racketpro/extensions/) on startup
-2. Auto-loads extensions found there
-3. Supports an extensions.rkt manifest listing extensions to load
-This would make extension management more practical than manual file-by-file loading.
+Add Scribble (.scrbl) support to /Users/antony/Development/RacketPro:
+1. Create a Monaco language definition for Scribble in
+   frontend/core/scribble-language.js (handling @-expressions, @racketblock,
+   @defproc, @title, etc.)
+2. Register it in frontend/core/primitives/editor.js
+3. Update racket/heavymental-core/editor.rkt detect-language to return
+   "scribble" for .scrbl files
+4. The check-syntax pipeline should still work since Scribble files are
+   Racket modules -- verify this with a test .scrbl file
+```
+
+---
+
+## Add PLT Redex integration
+
+PLT Redex is Racket's tool for modeling reduction semantics.
+
+```
+Add PLT Redex support to /Users/antony/Development/RacketPro. Implement:
+1. A "Redex" tab in the bottom tabs (add to main.rkt layout)
+2. A redex.rkt module in racket/heavymental-core/ that uses
+   redex/reduction-semantics to trace reductions
+3. A frontend hm-redex-panel component that displays reduction steps
+4. The Racket side should send redex:step messages with before/after terms
+   and highlighted positions, similar to stepper.rkt
+5. Consider using Redex's typesetting capabilities to generate rendered output
+```
+
+---
+
+## Add code formatting
+
+No code formatting support exists yet.
+
+```
+Add Racket code formatting to /Users/antony/Development/RacketPro:
+1. Integrate with raco fmt (if available) or implement basic indentation rules
+2. Add a "Format Document" menu action with Cmd+Shift+I shortcut
+3. Wire it through the menu and keybinding system in main.rkt
+4. The formatting should work by sending the current editor content to Racket,
+   which runs the formatter and sends back the formatted content
+5. Consider format-on-save as a settings option in settings.rkt
+```
+
+---
+
+## Add test runner integration
+
+The project has many test files but no in-IDE test runner.
+
+```
+Add a test runner panel to /Users/antony/Development/RacketPro:
+1. Add a "Tests" tab to the bottom tabs in main.rkt's layout
+2. Create test-runner.rkt in racket/heavymental-core/ that discovers rackunit
+   test files in the project and runs them
+3. Parse rackunit output to extract pass/fail/error results with source
+   locations
+4. Create an hm-test-panel Web Component for displaying results with
+   clickable links to failure locations (using editor:goto-file)
+5. Add a "Run Tests" menu item (Cmd+T or similar) and keybinding
+6. Run tests in a separate PTY so the REPL remains available
+```
+
+---
+
+## Expand E2E test coverage
+
+Existing E2E tests cover core features but miss several subsystems.
+
+```
+In /Users/antony/Development/RacketPro, expand E2E test coverage in
+test/e2e-app/tests/. Add tests for:
+1. Macro expander panel (expand macros on a file with define-syntax-rule,
+   verify steps appear)
+2. Extension loading and unloading (load counter.rkt, verify panel appears,
+   unload, verify panel removed)
+3. Project search (Cmd+Shift+F, type query, verify results)
+4. Settings panel (open, change font size, verify it applies)
+5. Theme switching (Light to Dark, verify CSS variables change)
+6. Keybinding customization (rebind a key, verify new binding works)
+Follow the pattern in existing tests (helpers.mjs for utilities).
+```
+
+---
+
+## Set up CI pipeline
+
+No CI configuration exists.
+
+```
+Create a GitHub Actions CI workflow for /Users/antony/Development/RacketPro
+at .github/workflows/ci.yml that:
+1. Runs on macOS (macos-latest or macos-14 for Apple Silicon)
+2. Installs Rust via rustup (version from .tool-versions: 1.93.1)
+3. Installs Racket and runs: raco pkg install --auto drracket-tool-lib
+4. Runs all Racket unit tests: for f in test/test-*.rkt; do racket "$f"; done
+5. Builds the Tauri app: cargo tauri build
+6. Caches Rust target/ and Racket package directories
+7. Triggers on push to main and pull requests
+```
+
+---
+
+## Create branded app icon and DMG
+
+The app uses default Tauri icons.
+
+```
+In /Users/antony/Development/RacketPro, create a branded application icon
+for RacketPro. The icon should reflect Racket/language-building themes while
+fitting the Linkuistics brand. Generate all required icon sizes in
+src-tauri/icons/ (32x32, 64x64, 128x128, 128x128@2x, icon.icns, icon.ico,
+icon.png). Update src-tauri/tauri.conf.json bundle section. Create a DMG
+background image. Test with cargo tauri build that the .app and .dmg use
+the new icons correctly.
+```
+
+---
+
+## Create extension development guide
+
+The extension system is powerful but documentation is minimal.
+
+```
+In /Users/antony/Development/RacketPro, create a template extension at
+extensions/template-extension.rkt with comprehensive comments explaining every
+feature of the extension API:
+- The define-extension macro with all keyword options (#:name, #:cells,
+  #:panels, #:events, #:menus, #:on-activate, #:on-deactivate)
+- The #lang heavymental/extend surface syntax alternative
+- The (ui ...) macro DSL for building layout trees
+- Custom components via define-component
+- Cell namespacing (extension cells are auto-prefixed with ext-id:)
+- Event dispatch (extension events are auto-prefixed)
+- Menu integration (adding items to existing menus)
+- Filesystem watching via watch-directory!
+- Live reload behavior (edit, save, auto-reload with debounce)
+Each feature should have a working example in the template.
+```
+
+---
+
+## Add extension auto-discovery
+
+Extensions are currently loaded manually via file dialog.
+
+```
+In /Users/antony/Development/RacketPro, add extension auto-discovery:
+1. On startup, scan ~/.config/racketpro/extensions/ for .rkt files
+2. Auto-load any extensions found there
+3. Add support for an extensions.rkt manifest file that lists extension paths
+4. Add an "Install Extension" option that copies an extension file to the
+   auto-load directory
+5. Implementation: add auto-load logic to main.rkt's startup sequence,
+   after register-all-cells! but before start-message-loop
 ```
