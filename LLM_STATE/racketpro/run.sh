@@ -20,7 +20,10 @@ Read these files for context:
 
 Follow the WORK phase from backlog-plan.md:
 1. Read plan.md and memory.md
-2. Pick the best next task (consider dependencies, priority, momentum)
+2. Display a summary of the current backlog (title, status, and priority for
+   each task). Then ask the user if they have any input on which task to work
+   on next. Wait for the user's response. If they have a preference, work on
+   that task; otherwise pick the best next task.
 3. Implement the task using TDD where applicable
 4. Run tests: for f in test/test-*.rkt; do racket \"\$f\"; done
 5. Verify with: cargo tauri dev (if UI changes)
