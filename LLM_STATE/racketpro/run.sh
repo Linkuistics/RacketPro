@@ -5,11 +5,12 @@
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT="$(cd "$DIR/../.." && pwd)"
+SESSION="$(basename "$PROJECT")"
 
 while true; do
   # Phase 1: WORK
   echo "\n=== WORK PHASE ==="
-  (cd "$PROJECT" && claude "You are working on RacketPro, a Racket-driven IDE built on Tauri.
+  (cd "$PROJECT" && claude --allow-dangerously-skip-permissions -n "$SESSION" "You are working on RacketPro, a Racket-driven IDE built on Tauri.
 
 Read these files for context:
 - CLAUDE.md (project conventions, architecture, commands)
@@ -37,7 +38,7 @@ Key conventions from CLAUDE.md:
 
   # Phase 2: REFLECT
   echo "\n=== REFLECT PHASE ==="
-  (cd "$PROJECT" && claude "You are reflecting on a work session for RacketPro.
+  (cd "$PROJECT" && claude --allow-dangerously-skip-permissions -n "$SESSION" "You are reflecting on a work session for RacketPro.
 
 Read these files:
 - ../LLM_CONTEXT/backlog-plan.md (the backlog plan format and reflect phase spec)
@@ -58,7 +59,7 @@ Do NOT read plan.md — avoid task-oriented thinking during reflection.")
 
   # Phase 3: TRIAGE
   echo "\n=== TRIAGE PHASE ==="
-  (cd "$PROJECT" && claude "You are triaging the task backlog for RacketPro.
+  (cd "$PROJECT" && claude --allow-dangerously-skip-permissions -n "$SESSION" "You are triaging the task backlog for RacketPro.
 
 Read these files:
 - ../LLM_CONTEXT/backlog-plan.md (the backlog plan format and triage phase spec)
