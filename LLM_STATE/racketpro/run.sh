@@ -23,6 +23,8 @@ for arg in "$@"; do
   esac
 done
 
+trap 'echo "\nExiting."; exit 130' INT
+
 while true; do
   PHASE=$(cat "$DIR/phase.md" 2>/dev/null || echo work)
   PROMPT=$(cat "$DIR/prompt-$PHASE.md")
