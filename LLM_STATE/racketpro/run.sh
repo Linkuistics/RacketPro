@@ -28,10 +28,11 @@ while true; do
   PROMPT=$(cat "$DIR/prompt-$PHASE.md")
   echo "\n=== $PHASE ==="
   (cd "$PROJECT" && claude $CLAUDE_ARGS -n "$PHASE-$SESSION" "$PROMPT")
-  [ $? -ne 0 ] && break
   NEW_PHASE=$(cat "$DIR/phase.md" 2>/dev/null || echo work)
-  [ "$PHASE" = "$NEW_PHASE" ] && break
-  echo "\n=== completed $PHASE → next: $NEW_PHASE ==="
-  echo "Press Enter to continue, Ctrl-C to quit..."
+  if [ "$PHASE" = "$NEW_PHASE" ]; then
+    echo "\n=== still in $PHASE — Enter to retry, Ctrl-C to quit ==="
+  else
+    echo "\n=== $PHASE → $NEW_PHASE — Enter to continue, Ctrl-C to quit ==="
+  fi
   read
 done
