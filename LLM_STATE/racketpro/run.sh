@@ -31,4 +31,7 @@ while true; do
   [ $? -ne 0 ] && break
   NEW_PHASE=$(cat "$DIR/phase.md" 2>/dev/null || echo work)
   [ "$PHASE" = "$NEW_PHASE" ] && break
+  echo "\n=== completed $PHASE → next: $NEW_PHASE ==="
+  echo "Press Enter to continue, Ctrl-C to quit..."
+  read
 done
