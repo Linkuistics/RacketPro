@@ -28,7 +28,7 @@ while true; do
   PHASE=$(cat "$DIR/phase.md" 2>/dev/null || echo work)
   PROMPT=$(cat "$DIR/prompt-$PHASE.md")
   echo "\n=== $PHASE ==="
-  (cd "$PROJECT" && claude $CLAUDE_ARGS -n "$PLAN-$PHASE-$SESSION" "$PROMPT")
+  (cd "$PROJECT" && claude $CLAUDE_ARGS -n "$PHASE-$PLAN-$SESSION" "$PROMPT")
   NEW_PHASE=$(cat "$DIR/phase.md" 2>/dev/null || echo work)
   if [ "$PHASE" = "$NEW_PHASE" ]; then
     echo "\n=== still in $PHASE — Enter to retry, Ctrl-C to quit ==="
