@@ -2,9 +2,9 @@ You are working on RacketPro, a Racket-driven IDE built on Tauri.
 
 Read these files for context:
 - CLAUDE.md (project conventions, architecture, commands)
-- ../LLM_CONTEXT/backlog-plan.md (the backlog plan format and phase cycle spec)
-- LLM_STATE/racketpro/backlog.md (task backlog)
-- LLM_STATE/racketpro/memory.md (distilled learnings)
+- {{LLM_CONTEXT}}/backlog-plan.md (the backlog plan format and phase cycle spec)
+- {{PLAN}}/backlog.md (task backlog)
+- {{PLAN}}/memory.md (distilled learnings)
 
 Follow the WORK phase from backlog-plan.md:
 1. Read backlog.md and memory.md
@@ -16,8 +16,8 @@ Follow the WORK phase from backlog-plan.md:
 4. Run tests: for f in test/test-*.rkt; do racket "$f"; done
 5. Verify with: cargo tauri dev (if UI changes)
 6. Record results on the task in backlog.md
-7. Append a session log entry to LLM_STATE/racketpro/session-log.md
-8. Write reflect to LLM_STATE/racketpro/phase.md
+7. Append a session log entry to {{PLAN}}/session-log.md
+8. Write reflect to {{PLAN}}/phase.md
 9. Stop — do not pick another task, do not reflect, do not triage
 
 Key conventions from CLAUDE.md:
