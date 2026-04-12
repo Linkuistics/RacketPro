@@ -1,7 +1,7 @@
 You are reflecting on a work session for RacketPro.
 
 Read these files:
-- {{LLM_CONTEXT}}/backlog-plan.md (the backlog plan format and reflect phase spec)
+- {{DEV_ROOT}}/LLM_CONTEXT/backlog-plan.md (the backlog plan format and reflect phase spec)
 - {{PLAN}}/session-log.md (latest entry)
 - {{PLAN}}/memory.md (current distilled learnings)
 

@@ -1,8 +1,8 @@
 You are working on RacketPro, a Racket-driven IDE built on Tauri.
 
 Read these files for context:
-- {{PROJECT}}/CLAUDE.md (project conventions, architecture, commands)
-- {{LLM_CONTEXT}}/backlog-plan.md (the backlog plan format and phase cycle spec)
+- {{PROJECT}}/README.md (project conventions, architecture, commands)
+- {{DEV_ROOT}}/LLM_CONTEXT/backlog-plan.md (the backlog plan format and phase cycle spec)
 - {{PLAN}}/backlog.md (task backlog)
 - {{PLAN}}/memory.md (distilled learnings)
 

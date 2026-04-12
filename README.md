@@ -164,6 +164,33 @@ racket test/test-theme.rkt
 
 No frontend build step -- Tauri serves `frontend/` as static files.
 
+## Development Conventions
+
+- **Racket message types** use colon-separated namespaces: `cell:update`,
+  `intel:diagnostics`, `editor:open`, `menu:action`, `pty:output`
+- **Web Components** are prefixed `hm-` and live in `frontend/core/primitives/`
+- **All components** extend `LitElement` directly (layout primitives) or
+  `HmElement` (for deferred init avoiding WKWebView IPC deadlock)
+- **No build step** -- all frontend code is native ES modules with an import
+  map in `index.html`
+- **Tests are Racket-only** (rackunit). No JS tests. Test files require modules
+  via relative paths like `"../racket/heavymental-core/protocol.rkt"`
+- **Racket provides are explicit** -- every exported function must be in the
+  `provide` list
+- **Title separator** is em-dash (`\u2014`), not hyphen:
+  `"HeavyMental — filename.rkt"`
+- **Monaco column convention**: Racket uses 0-based columns, Monaco uses
+  1-based. Always `+1` when converting Racket→Monaco.
+
+## Debug Harness
+
+In debug builds, `/tmp/heavymental-debug/` provides:
+
+- `console.log` -> captured to `console.log` file
+- DOM snapshots -> `dom.html`
+- JS eval: write to `eval-input.js`, result appears in `eval-output.txt`
+- CrabNebula devtools for Rust tracing (auto-starts)
+
 ## Related Projects
 
 - **[APIAnyware-MacOS](https://github.com/linkuistics/APIAnyware-MacOS)** -- provides the native macOS API bindings that the Linkuistics IDE family will transition to

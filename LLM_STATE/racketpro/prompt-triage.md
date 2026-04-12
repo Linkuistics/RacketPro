@@ -1,7 +1,7 @@
 You are triaging the task backlog for RacketPro.
 
 Read these files:
-- {{LLM_CONTEXT}}/backlog-plan.md (the backlog plan format and triage phase spec)
+- {{DEV_ROOT}}/LLM_CONTEXT/backlog-plan.md (the backlog plan format and triage phase spec)
 - {{PLAN}}/backlog.md (task backlog)
 - {{PLAN}}/memory.md (distilled learnings)
 
