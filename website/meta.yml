@@ -1,0 +1,11 @@
+name: RacketPro
+slug: racketpro
+tagline: A native macOS language workbench for Racket, Rhombus, and DSL development.
+summary: |
+  RacketPro is a native macOS IDE designed for professional language development with Racket.
+  Where DrRacket targets learners, RacketPro targets language builders — providing macro
+  expansion visualization, algebraic stepping, check-syntax intelligence, and a Racket-native
+  extension system. Built on a Tauri/Rust bridge with Racket as the application brain.
+status: progress
+github_url: https://github.com/Linkuistics/RacketPro
+tags: [ide, racket]
